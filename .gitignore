@@ -1,0 +1,18 @@
+# Environnements virtuels
+venv/
+.venv/
+
+# Base vectorielle générée
+chroma_db/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Variables d'environnement
+.env
+
+# IDE
+.idea/
+.vscode/
