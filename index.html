@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مساعد RAG الذكي</title>
+    <!-- Tailwind CSS for beautiful styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 h-screen flex flex-col justify-between font-sans">
+
+    <!-- Chat Header -->
+    <header class="bg-indigo-600 text-white p-4 shadow-md text-center">
+        <h1 class="text-xl font-bold">مساعد الـ RAG الذكي للمستندات العربية 🤖</h1>
+        <p class="text-xs opacity-90 mt-1">FastAPI & ChromaDB & Ollama</p>
+    </header>
+
+    <!-- Chat Window -->
+    <main id="chat-window" class="flex-1 p-6 overflow-y-auto space-y-4 max-w-2xl mx-auto w-full">
+        <!-- Welcome message from the bot -->
+        <div class="flex justify-start">
+            <div class="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 max-w-md text-right text-slate-800" dir="rtl">
+                مرحباً بك {nickname}! أنا مساعدك الذكي. اسألني أي سؤال حول مستندات الـ PDF الخاصة بك وسأبحث عنها وأجيبك فوراً باللغة العربية.
+            </div>
+        </div>
+    </main>
+
+    <!-- Chat Input Area -->
+    <footer class="bg-white p-4 border-t border-slate-200 shadow-inner w-full">
+        <form id="chat-form" class="max-w-2xl mx-auto flex gap-2">
+            <input
+                type="text"
+                id="user-input"
+                placeholder="اكتب سؤالك باللغة العربية هنا..."
+                class="flex-1 border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-right text-slate-800"
+                dir="rtl"
+                required
+            >
+            <button
+                type="submit"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-semibold transition-all shadow-sm"
+            >
+                إرسال
+            </button>
+        </form>
+    </footer>
+
+    <script>
+        const chatWindow = document.getElementById('chat-window');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+
+        // Function to dynamically append a message bubble
+        function appendMessage(text, isUser = false) {
+            const wrapper = document.createElement('div');
+            wrapper.className = isUser ? 'flex justify-end' : 'flex justify-start';
+
+            const bubble = document.createElement('div');
+            bubble.className = isUser
+                ? 'bg-indigo-600 text-white p-3 rounded-2xl shadow-md max-w-md text-right'
+                : 'bg-white text-slate-800 p-3 rounded-2xl shadow-sm border border-slate-100 max-w-md text-right';
+
+            bubble.setAttribute('dir', 'rtl');
+            bubble.textContent = text;
+
+            wrapper.appendChild(bubble);
+            chatWindow.appendChild(wrapper);
+
+            // Auto scroll to bottom
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        // Handle sending message
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const question = userInput.value.trim();
+            if (!question) return;
+
+            // Append User Question
+            appendMessage(question, true);
+            userInput.value = '';
+
+            // Show Loading Indicator
+            const loadingWrapper = document.createElement('div');
+            loadingWrapper.className = 'flex justify-start';
+            const loadingBubble = document.createElement('div');
+            loadingBubble.className = 'bg-slate-200 text-slate-500 p-3 rounded-2xl shadow-sm text-sm';
+            loadingBubble.textContent = 'يجري البحث في مستنداتك وصياغة الإجابة...';
+            loadingWrapper.appendChild(loadingBubble);
+            chatWindow.appendChild(loadingWrapper);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+
+            try {
+                // Call your local FastAPI server
+                const response = await fetch(`http://127.0.0.1:8000/ask?question=${encodeURIComponent(question)}`);
+                const data = await response.json();
+
+                // Remove loading indicator
+                chatWindow.removeChild(loadingWrapper);
+
+                if (response.ok) {
+                    appendMessage(data.answer, false);
+                } else {
+                    appendMessage('عذرًا، واجهت مشكلة في معالجة سؤالك.', false);
+                }
+            } catch (error) {
+                chatWindow.removeChild(loadingWrapper);
+                appendMessage('عذرًا، لم أتمكن من الاتصال بخادم الـ API الخاص بك. يرجى التأكد من تشغيل FastAPI uvicorn على الرابط http://127.0.0.1:8000', false);
+                console.error('Error connecting to backend:', error);
+            }
+        });
+    </script>
+</body>
+</html>
