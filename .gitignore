@@ -5,6 +5,10 @@ venv/
 # Base vectorielle générée
 chroma_db/
 
+# Base de données des comptes
+*.db
+data/app.db
+
 # Cache Python
 __pycache__/
 *.py[cod]

@@ -64,3 +64,26 @@ Optionnel : copier `.env.example` en `.env` pour surcharger la configuration.
   "context_used": ["..."]
 }
 ```
+
+## Utilisation avec Docker
+
+```bash
+# Construire l'image et lancer tous les services (API + Ollama)
+docker compose up --build
+
+# Au premier lancement, le conteneur "ollama-pull" télécharge les modèles
+# bge-m3 et llama3.1. C'est long (plusieurs Go) et fait UNE SEULE fois.
+
+# Interface web :  http://localhost:8000
+# Documentation :  http://localhost:8000/docs
+# Santé :          http://localhost:8000/health
+
+# Reconstruire la base vectorielle (à l'intérieur du conteneur) :
+docker compose run --rm api python scripts/build_kb.py
+
+# Arrêter les conteneurs :
+docker compose down
+```
+
+Les volumes `./chroma_db` et `./data` sont montés depuis le projet : les données
+sont donc partagées entre le lancement local (`uvicorn`) et Docker.

@@ -12,6 +12,13 @@ from chromadb.utils.embedding_functions.ollama_embedding_function import (
 
 from app import config
 
+# Connexions mises en cache pour ne pas recréer un client/une collection à
+# chaque requête, et pour ne pas charger Ollama au démarrage (chargement
+# paresseux : la collection n'est créée qu'au premier appel).
+_client = None
+_collection = None
+_ollama_client = None
+
 
 def get_embedding_function():
     """Fonction d'embedding bge-m3 servie par Ollama."""
@@ -21,13 +28,31 @@ def get_embedding_function():
     )
 
 
+def get_client():
+    """Retourne le client ChromaDB persistant (créé une seule fois)."""
+    global _client
+    if _client is None:
+        _client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    return _client
+
+
 def get_collection():
-    """Retourne la collection ChromaDB (créée si absente)."""
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
-    return client.get_or_create_collection(
-        name=config.COLLECTION_NAME,
-        embedding_function=get_embedding_function(),
-    )
+    """Retourne la collection ChromaDB (créée si absente, une seule fois)."""
+    global _collection
+    if _collection is None:
+        _collection = get_client().get_or_create_collection(
+            name=config.COLLECTION_NAME,
+            embedding_function=get_embedding_function(),
+        )
+    return _collection
+
+
+def get_ollama_client():
+    """Retourne un client Ollama pointant vers l'URL configurée (une seule fois)."""
+    global _ollama_client
+    if _ollama_client is None:
+        _ollama_client = ollama.Client(host=config.OLLAMA_URL)
+    return _ollama_client
 
 
 def retrieve(collection, question, n_results=None):
@@ -47,11 +72,19 @@ def retrieve(collection, question, n_results=None):
 
     docs = results["documents"][0]
     metadatas = results["metadatas"][0]
+    distances = results["distances"][0]
 
-    sources = []
-    for meta in metadatas:
+    # Filtre de pertinence : on ignore les chunks dont la distance dépasse le
+    # seuil configuré (désactivé si DISTANCE_THRESHOLD <= 0).
+    threshold = config.DISTANCE_THRESHOLD
+    filtered_docs, sources = [], []
+
+    for doc, meta, distance in zip(docs, metadatas, distances):
         if not meta:
             continue
+        if threshold > 0 and distance is not None and distance > threshold:
+            continue
+        filtered_docs.append(doc)
         sources.append({
             "source": meta.get("source"),
             "page": meta.get("page"),
@@ -59,7 +92,7 @@ def retrieve(collection, question, n_results=None):
             "line_end": meta.get("line_end"),
         })
 
-    return docs, sources
+    return filtered_docs, sources
 
 
 def generate(question, context):
@@ -72,7 +105,7 @@ def generate(question, context):
 السؤال: {question}
 الإجابة:"""
 
-    response = ollama.chat(
+    response = get_ollama_client().chat(
         model=config.LLM_MODEL,
         messages=[{"role": "user", "content": augmented_prompt}],
     )

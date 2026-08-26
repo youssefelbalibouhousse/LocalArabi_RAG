@@ -1,0 +1,60 @@
+# Docker Compose : version 100 % conteneurisée (API + Ollama).
+#
+# Lancement :  docker compose up --build
+# Arrêt :      docker compose down
+#
+# Au premier lancement, le service "ollama-pull" télécharge les modèles
+# bge-m3 et llama3.1 dans le volume "ollama" (plusieurs Go, une seule fois).
+
+services:
+  # --- Serveur de modèles Ollama --------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      # 11435 côté hôte pour éviter le conflit avec un Ollama natif éventuel
+      # (le conteneur API, lui, passe par le réseau interne, pas par ce port).
+      - "11435:11434"
+
+  # --- Conteneur jetable : télécharge les modèles (une seule fois) -------
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ollama:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    # Réessaie automatiquement en cas de coupure réseau (le téléchargement
+    # reprend là où il s'était arrêté).
+    command:
+      - |
+        until ollama pull bge-m3; do echo '⚠️ bge-m3: nouvel essai dans 10 s...'; sleep 10; done
+        until ollama pull llama3.1; do echo '⚠️ llama3.1: nouvel essai dans 10 s...'; sleep 10; done
+        echo '✅ Modèles téléchargés.'
+    restart: "no"
+
+  # --- API FastAPI -------------------------------------------------------
+  api:
+    build: .
+    environment:
+      # Dans le réseau Docker, Ollama est joignable via son nom de service.
+      - OLLAMA_URL=http://ollama:11434
+      # Clé de DEV uniquement — à remplacer par un vrai secret en production.
+      - SECRET_KEY=dev-secret-change-me
+      - CORS_ALLOW_ORIGINS=*
+    volumes:
+      # On monte les dossiers locaux pour que la base vectorielle et les
+      # comptes/PDF soient persistants.
+      - ./chroma_db:/app/chroma_db
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - ollama
+
+# Volumes nommés (gérés par Docker, pas de chemin à connaître)
+volumes:
+  ollama:

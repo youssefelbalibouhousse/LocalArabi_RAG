@@ -1,0 +1,29 @@
+# Environnements virtuels locaux
+venv/
+.venv/
+
+# Données (base vectorielle, PDF, base SQLite) : montées via des volumes,
+# jamais copiées dans l'image.
+chroma_db/
+data/
+
+# Secrets et variables d'environnement
+.env
+.env.*
+
+# Versioning
+.git/
+.gitignore
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+.junie/
+
+# Fichiers de test locaux
+test_main.http

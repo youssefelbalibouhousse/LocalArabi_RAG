@@ -1,11 +1,50 @@
 # Test your FastAPI endpoints
 
-GET http://127.0.0.1:8000/
+@host = http://127.0.0.1:8000
+
+### --- Santé / info ------------------------------------------------------
+
+GET {{host}}/
 Accept: application/json
 
 ###
 
-GET http://127.0.0.1:8000/hello/User
+# --- Inscription ---------------------------------------------------------
+
+POST {{host}}/register
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "motdepasse123"
+}
+
+###
+
+# --- Connexion -----------------------------------------------------------
+# Copiez la valeur de "access_token" de la réponse dans la variable @token
+# ci-dessous pour tester les routes protégées.
+
+POST {{host}}/login
+Content-Type: application/x-www-form-urlencoded
+
+username=alice&password=motdepasse123
+
+###
+
+@token = <collez-votre-access_token-ici>
+
+# --- Profil de l'utilisateur connecté ------------------------------------
+
+GET {{host}}/me
+Authorization: Bearer {{token}}
+
+###
+
+# --- Question au chatbot -------------------------------------------------
+
+GET {{host}}/ask?question=ما هو موضوع الوثيقة؟
+Authorization: Bearer {{token}}
 Accept: application/json
 
 ###
