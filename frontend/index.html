@@ -16,9 +16,12 @@
                 <h1 id="app-title" class="text-xl font-bold">مساعد الـ RAG الذكي للمستندات العربية 🤖</h1>
                 <p class="text-xs opacity-90 mt-1">FastAPI & ChromaDB & Ollama</p>
             </div>
-            <div id="user-bar" class="hidden items-center gap-2 shrink-0">
-                <span id="user-name" class="text-sm font-semibold"></span>
-                <button id="logout-btn" type="button" class="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-sm transition-all">تسجيل الخروج</button>
+            <div class="flex items-center gap-2 shrink-0">
+                <button id="lang-back-btn" type="button" title="Changer de langue" class="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-sm transition-all">🌐</button>
+                <div id="user-bar" class="hidden items-center gap-2">
+                    <span id="user-name" class="text-sm font-semibold"></span>
+                    <button id="logout-btn" type="button" class="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-sm transition-all">تسجيل الخروج</button>
+                </div>
             </div>
         </div>
     </header>
@@ -106,6 +109,7 @@
             ar: {
                 appTitle: 'مساعد الـ RAG الذكي للمستندات العربية 🤖',
                 logout: 'تسجيل الخروج',
+                changeLang: 'تغيير اللغة',
                 loginTitle: 'تسجيل الدخول',
                 username: 'اسم المستخدم',
                 password: 'كلمة المرور',
@@ -122,6 +126,7 @@
             fr: {
                 appTitle: 'Assistant RAG intelligent pour vos documents 📚',
                 logout: 'Se déconnecter',
+                changeLang: 'Changer de langue',
                 loginTitle: 'Connexion',
                 username: "Nom d'utilisateur",
                 password: 'Mot de passe',
@@ -159,6 +164,7 @@
         const userBar = document.getElementById('user-bar');
         const userNameEl = document.getElementById('user-name');
         const logoutBtn = document.getElementById('logout-btn');
+        const langBackBtn = document.getElementById('lang-back-btn');
         const footer = document.querySelector('footer');
 
         function t(key) { return I18N[currentLang][key]; }
@@ -179,6 +185,7 @@
             registerBtn.textContent = I18N[currentLang].register;
             userInput.placeholder = I18N[currentLang].inputPlaceholder;
             sendBtn.textContent = I18N[currentLang].send;
+            langBackBtn.textContent = '🌐 ' + I18N[currentLang].changeLang;
 
             [authForm, loginTitle, authError].forEach(el => el.setAttribute('dir', isRtl ? 'rtl' : 'ltr'));
             [authUsername, authPassword].forEach(el => {
@@ -189,16 +196,28 @@
             userInput.style.textAlign = isRtl ? 'right' : 'left';
         }
 
+        function showLangPanel() {
+            chatWindow.innerHTML = '';
+            langPanel.classList.remove('hidden');
+            authPanel.classList.add('hidden');
+            chatWindow.classList.add('hidden');
+            userBar.classList.add('hidden');
+            footer.classList.add('hidden');
+            langBackBtn.classList.add('hidden');
+        }
+
         function chooseLang(lang) {
             currentLang = lang;
             localStorage.setItem('chatbot_language', lang);
             applyLang();
             langPanel.classList.add('hidden');
+            langBackBtn.classList.remove('hidden');
             initAfterLang();
         }
 
         langAr.addEventListener('click', () => chooseLang('ar'));
         langFr.addEventListener('click', () => chooseLang('fr'));
+        langBackBtn.addEventListener('click', showLangPanel);
 
         // --- Gestion du jeton d'authentification ---
         function getToken() { return localStorage.getItem('chatbot_token'); }
@@ -212,6 +231,7 @@
             chatWindow.classList.add('hidden');
             userBar.classList.add('hidden');
             footer.classList.add('hidden');
+            langBackBtn.classList.remove('hidden');
         }
 
         function showChat(username) {
@@ -220,6 +240,7 @@
             chatWindow.classList.remove('hidden');
             userBar.classList.remove('hidden');
             footer.classList.remove('hidden');
+            langBackBtn.classList.remove('hidden');
             userNameEl.textContent = username;
         }
 
@@ -410,6 +431,7 @@
             chatWindow.classList.add('hidden');
             footer.classList.add('hidden');
             userBar.classList.add('hidden');
+            langBackBtn.classList.add('hidden');
             langPanel.classList.remove('hidden');
         }
     </script>
