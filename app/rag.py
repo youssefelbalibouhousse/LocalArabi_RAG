@@ -144,3 +144,20 @@ def format_sources(sources, language="ar"):
             )
     separator = ", " if language == "fr" else "، "
     return separator.join(parts)
+
+
+def format_excerpts(docs, sources, language="ar", max_chars=200):
+    """Construit la liste des extraits (phrases) cités, chacun suivi de sa référence.
+
+    Exemple :
+    1. « ...texte du passage... » — fichier.pdf — page 5 (lignes 1-9)
+    """
+    header = "📄 Extraits cités :" if language == "fr" else "📄 المقتطفات:"
+    items = []
+    for i, (doc, src) in enumerate(zip(docs, sources), start=1):
+        text = (doc or "").strip().replace("\n", " ")
+        if len(text) > max_chars:
+            text = text[:max_chars].rstrip() + "…"
+        ref = format_sources([src], language)
+        items.append(f"{i}. « {text} » — {ref}")
+    return header + "\n" + "\n".join(items)

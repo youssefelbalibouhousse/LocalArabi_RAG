@@ -146,6 +146,8 @@ def ask(
     if sources:
         label = "📄 Sources : " if language == "fr" else "📄 المصادر: "
         answer = f"{answer}\n\n{label}{rag.format_sources(sources, language)}"
+        # 4. Ajoute les extraits (phrases) cités, avec leur référence
+        answer = f"{answer}\n\n{rag.format_excerpts(docs, sources, language)}"
 
     return {
         "question": question,
