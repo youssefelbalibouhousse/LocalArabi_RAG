@@ -10,6 +10,7 @@ services:
   # --- Serveur de modèles Ollama --------------------------------------
   ollama:
     image: ollama/ollama:latest
+    restart: unless-stopped
     volumes:
       - ollama:/root/.ollama
     ports:
@@ -39,6 +40,7 @@ services:
   # --- API FastAPI -------------------------------------------------------
   api:
     build: .
+    restart: unless-stopped
     environment:
       # Dans le réseau Docker, Ollama est joignable via son nom de service.
       - OLLAMA_URL=http://ollama:11434
