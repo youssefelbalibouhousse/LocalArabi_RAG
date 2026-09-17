@@ -109,34 +109,50 @@ def read_me(user: User = Depends(auth.get_current_user)):
 # --- Chatbot (protégé) ---------------------------------------------------
 
 @app.get("/ask")
-def ask_arabic(question: str, user: User = Depends(auth.get_current_user)):
+def ask(
+    question: str,
+    language: str = "ar",
+    user: User = Depends(auth.get_current_user),
+):
+    # Langue de la réponse : "fr" ou "ar" (toute autre valeur → arabe).
+    language = "fr" if language.lower() == "fr" else "ar"
+
     # 1. RETRIEVE — chunks les plus proches + leurs sources (fichier/page/lignes).
     # La collection est chargée paresseusement (au premier appel, pas au démarrage).
     docs, sources = rag.retrieve(rag.get_collection(), question)
+
+    no_info = (
+        "Désolé, il n'y a pas assez d'informations dans les documents fournis."
+        if language == "fr"
+        else "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة."
+    )
 
     # Si aucun chunk pertinent n'a été trouvé, on n'appelle pas le LLM.
     if not docs:
         return {
             "question": question,
-            "answer": "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة.",
+            "answer": no_info,
             "sources": sources,
             "context_used": docs,
+            "language": language,
         }
 
     context = "\n\n".join(docs)
 
-    # 2. GENERATE — réponse en arabe basée uniquement sur le contexte
-    answer = rag.generate(question, context)
+    # 2. GENERATE — réponse basée uniquement sur le contexte, dans la langue demandée
+    answer = rag.generate(question, context, language)
 
     # 3. Ajoute la mention des sources à la réponse
     if sources:
-        answer = f"{answer}\n\n📄 المصادر: {rag.format_sources(sources)}"
+        label = "📄 Sources : " if language == "fr" else "📄 المصادر: "
+        answer = f"{answer}\n\n{label}{rag.format_sources(sources, language)}"
 
     return {
         "question": question,
         "answer": answer,
         "sources": sources,
         "context_used": docs,
+        "language": language,
     }
 
 

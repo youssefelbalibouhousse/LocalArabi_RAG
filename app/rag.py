@@ -95,9 +95,22 @@ def retrieve(collection, question, n_results=None):
     return filtered_docs, sources
 
 
-def generate(question, context):
-    """Envoie le contexte + la question au LLM et retourne la réponse en arabe."""
-    augmented_prompt = f"""استخدم السياق التالي فقط للإجابة على السؤال بدقة باللغة العربية. إذا كان السياق لا يحتوي على الإجابة، قل "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة".
+def generate(question, context, language="ar"):
+    """Envoie le contexte + la question au LLM et retourne la réponse dans la langue demandée.
+
+    `language` : "ar" (arabe) ou "fr" (français). Le modèle lit le contexte
+    (qui peut être en arabe) et rédige sa réponse dans la langue cible.
+    """
+    if language == "fr":
+        augmented_prompt = f"""Utilise uniquement le contexte suivant pour répondre précisément à la question, en français. Si le contexte ne contient pas la réponse, dis : « Désolé, il n'y a pas assez d'informations dans les documents fournis. ».
+
+Contexte extrait :
+{context}
+
+Question : {question}
+Réponse :"""
+    else:
+        augmented_prompt = f"""استخدم السياق التالي فقط للإجابة على السؤال بدقة باللغة العربية. إذا كان السياق لا يحتوي على الإجابة، قل "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة".
 
 السياق المستخرج:
 {context}
@@ -112,12 +125,22 @@ def generate(question, context):
     return response["message"]["content"]
 
 
-def format_sources(sources):
-    """Construit la mention arabe des sources : « fichier — صفحة X (الأسطر a-b) »."""
+def format_sources(sources, language="ar"):
+    """Construit la mention des sources dans la langue demandée.
+
+    Arabe : « fichier — صفحة X (الأسطر a-b) »
+    Français : « fichier — page X (lignes a-b) »
+    """
     parts = []
     for s in sources:
         prefix = f"{s['source']} — " if s.get("source") else ""
-        parts.append(
-            f"{prefix}صفحة {s['page']} (الأسطر {s['line_start']}-{s['line_end']})"
-        )
-    return "، ".join(parts)
+        if language == "fr":
+            parts.append(
+                f"{prefix}page {s['page']} (lignes {s['line_start']}-{s['line_end']})"
+            )
+        else:
+            parts.append(
+                f"{prefix}صفحة {s['page']} (الأسطر {s['line_start']}-{s['line_end']})"
+            )
+    separator = ", " if language == "fr" else "، "
+    return separator.join(parts)
