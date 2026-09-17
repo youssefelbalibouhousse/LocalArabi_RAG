@@ -14,7 +14,7 @@ from pypdf import PdfReader
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import config  # noqa: E402
-from app.rag import get_embedding_function  # noqa: E402
+from app.rag import get_embedding_function, get_ollama_client  # noqa: E402
 import chromadb  # noqa: E402
 
 
@@ -78,24 +78,29 @@ def chunk_pages(pages, chunk_size=None):
     return chunks
 
 
+def check_ollama():
+    """Vérifie que le serveur Ollama est joignable (indispensable pour les embeddings).
+
+    Retourne True si joignable, False sinon (sans rien modifier).
+    """
+    try:
+        get_ollama_client().list()
+        return True
+    except Exception as exc:  # noqa: BLE001 - on veut un message clair, pas un crash
+        print(f"❌ Impossible de joindre Ollama sur {config.OLLAMA_URL}.")
+        print(f"   Détail : {exc}")
+        print("   Démarrez Ollama (ou la pile Docker : docker compose up -d) puis réessayez.")
+        return False
+
+
 def main():
     pdf_paths = sorted(config.DOCUMENTS_DIR.glob("*.pdf"))
     if not pdf_paths:
         print(f"❌ Aucun PDF trouvé dans {config.DOCUMENTS_DIR}")
         return
 
-    # On reconstruit la collection de zéro pour garantir des métadonnées cohérentes.
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
-    try:
-        client.delete_collection(name=config.COLLECTION_NAME)
-    except Exception:
-        pass  # la collection n'existait pas encore
-
-    collection = client.create_collection(
-        name=config.COLLECTION_NAME,
-        embedding_function=get_embedding_function(),
-    )
-
+    # 1. Extraire et découper TOUS les PDF AVANT de toucher à la base.
+    #    Ainsi, si l'extraction échoue, la collection existante est préservée.
     documents, ids, metadatas = [], [], []
 
     for pdf_path in pdf_paths:
@@ -117,9 +122,25 @@ def main():
         print(f"  → {len(chunks)} chunks depuis {pdf_path.name}")
 
     if not documents:
-        print("❌ Aucun chunk créé (PDF vides ?).")
+        print("❌ Aucun chunk créé (PDF vides ?). La base existante n'a PAS été modifiée.")
         return
 
+    # 2. Vérifier qu'Ollama est joignable AVANT de supprimer quoi que ce soit.
+    if not check_ollama():
+        print("❌ Opération annulée : la base existante a été conservée.")
+        return
+
+    # 3. Reconstruire la collection seulement maintenant (tout est prêt).
+    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    try:
+        client.delete_collection(name=config.COLLECTION_NAME)
+    except Exception:
+        pass  # la collection n'existait pas encore
+
+    collection = client.create_collection(
+        name=config.COLLECTION_NAME,
+        embedding_function=get_embedding_function(),
+    )
     collection.add(documents=documents, ids=ids, metadatas=metadatas)
 
     print(f"\n🎉 Succès ! {len(documents)} chunks ajoutés dans ChromaDB.")
