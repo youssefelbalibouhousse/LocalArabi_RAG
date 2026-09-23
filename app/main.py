@@ -21,12 +21,22 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Au démarrage : crée le fichier de base et les tables si nécessaire.
     create_db_and_tables()
-    # Avertit si la clé de signature des jetons est encore celle de développement.
-    if config.SECRET_KEY == "dev-secret-change-me":
+
+    # Sécurité : en production, on refuse de démarrer avec la clé de développement.
+    # Principe « fail fast » : mieux vaut une erreur explicite au démarrage
+    # qu'un service silencieusement vulnérable.
+    if config.using_default_secret_key():
+        if config.ENVIRONMENT == "production":
+            raise RuntimeError(
+                "SECRET_KEY n'est pas définie alors que ENVIRONMENT=production. "
+                "Générez une clé avec : "
+                'python -c "import secrets; print(secrets.token_hex(32))"'
+            )
         logger.warning(
-            "SECRET_KEY utilise la valeur de développement par défaut. "
-            "Définissez la variable d'environnement SECRET_KEY en production."
+            "SECRET_KEY utilise la clé de développement par défaut. "
+            "Définissez SECRET_KEY avant tout déploiement en production."
         )
+
     yield
     # (rien à nettoyer à l'arrêt pour l'instant)
 

@@ -44,8 +44,24 @@ CORS_ALLOW_ORIGINS = [
 # Base de données des comptes (SQLite par défaut, fichier data/app.db).
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data' / 'app.db'}")
 
-# Clé de signature des jetons JWT. DOIT être secrète et changée en production
-# (générer avec : python -c "import secrets; print(secrets.token_hex(32))").
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
+# Environnement d'exécution : "development" (défaut) ou "production".
+# En production, l'application refuse de démarrer avec la clé de développement.
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
+
+# Clé de signature des jetons JWT.
+# Contraintes : au moins 32 octets (RFC 7518, algorithme HS256).
+# Générer une vraie clé avec : python -c "import secrets; print(secrets.token_hex(32))"
+#
+# La clé ci-dessous est PUBLIQUE et ne sert qu'au développement local.
+# Sa longueur respecte volontairement la contrainte RFC pour éviter les
+# avertissements de bibliothèque, mais elle ne protège rien.
+DEV_SECRET_KEY = "dev-only-secret-key-change-me-in-production"
+SECRET_KEY = os.getenv("SECRET_KEY", DEV_SECRET_KEY)
+
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+
+
+def using_default_secret_key() -> bool:
+    """Indique si la clé JWT n'a pas été fournie (clé de développement)."""
+    return SECRET_KEY == DEV_SECRET_KEY

@@ -51,5 +51,11 @@ def test_access_token_invalide_si_mauvaise_signature():
     """Un jeton signé avec une autre clé doit être rejeté."""
     token = auth.create_access_token("alice")
 
+    # La fausse clé respecte aussi la longueur minimale : on teste bien
+    # le rejet par signature invalide, pas la longueur de la clé.
     with pytest.raises(jwt.PyJWTError):
-        jwt.decode(token, "mauvaise-cle-secrete", algorithms=[config.JWT_ALGORITHM])
+        jwt.decode(
+            token,
+            "mauvaise-cle-secrete-mais-assez-longue-pour-hs256",
+            algorithms=[config.JWT_ALGORITHM],
+        )

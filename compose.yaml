@@ -44,8 +44,10 @@ services:
     environment:
       # Dans le réseau Docker, Ollama est joignable via son nom de service.
       - OLLAMA_URL=http://ollama:11434
-      # Clé de DEV uniquement — à remplacer par un vrai secret en production.
-      - SECRET_KEY=dev-secret-change-me
+      # Valeurs de développement par défaut ; surchargées en production via .env :
+      #   SECRET_KEY=<clé générée>  et  ENVIRONMENT=production
+      - SECRET_KEY=${SECRET_KEY:-dev-only-secret-key-change-me-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - CORS_ALLOW_ORIGINS=*
     volumes:
       # On monte les dossiers locaux pour que la base vectorielle et les
