@@ -67,3 +67,32 @@ def test_demarre_en_developpement_avec_la_cle_par_defaut(monkeypatch):
 
     with TestClient(main.app) as client:
         assert client.get("/health").status_code == 200
+
+
+# --- Lecture des variables d'environnement booléennes --------------------
+
+@pytest.mark.parametrize("valeur", ["1", "true", "TRUE", " yes ", "on"])
+def test_env_flag_reconnait_les_valeurs_vraies(monkeypatch, valeur):
+    monkeypatch.setenv("TEST_FLAG", valeur)
+
+    assert config._env_flag("TEST_FLAG", False) is True
+
+
+@pytest.mark.parametrize("valeur", ["0", "false", "no", "off", "n'importe quoi"])
+def test_env_flag_reconnait_les_valeurs_fausses(monkeypatch, valeur):
+    monkeypatch.setenv("TEST_FLAG", valeur)
+
+    assert config._env_flag("TEST_FLAG", True) is False
+
+
+def test_env_flag_absente_renvoie_le_defaut(monkeypatch):
+    monkeypatch.delenv("TEST_FLAG", raising=False)
+
+    assert config._env_flag("TEST_FLAG", True) is True
+
+
+def test_env_flag_vide_renvoie_le_defaut(monkeypatch):
+    """Une variable vide (ex. `${VAR:-}` dans compose) ne doit pas écraser le défaut."""
+    monkeypatch.setenv("TEST_FLAG", "")
+
+    assert config._env_flag("TEST_FLAG", True) is True

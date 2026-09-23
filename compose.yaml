@@ -48,6 +48,8 @@ services:
       #   SECRET_KEY=<clé générée>  et  ENVIRONMENT=production
       - SECRET_KEY=${SECRET_KEY:-dev-only-secret-key-change-me-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      # Vide => logique par défaut : ouverte en dev, fermée en production.
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-}
       - CORS_ALLOW_ORIGINS=*
     volumes:
       # On monte les dossiers locaux pour que la base vectorielle et les

@@ -10,6 +10,21 @@ from pathlib import Path
 # Racine du projet, indépendante du répertoire courant.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+# --- Utilitaires ---------------------------------------------------------
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Lit une variable d'environnement booléenne.
+
+    Valeurs considérées comme vraies : 1, true, yes, on (insensible à la casse).
+    Une variable absente OU vide renvoie la valeur par défaut (ce qui permet
+    d'écrire ``ALLOW_REGISTRATION=`` dans un fichier .env sans changer le comportement).
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
 # Emplacements
 DOCUMENTS_DIR = BASE_DIR / "data" / "documents"
 CHROMA_DB_PATH = str(BASE_DIR / "chroma_db")
@@ -60,6 +75,16 @@ SECRET_KEY = os.getenv("SECRET_KEY", DEV_SECRET_KEY)
 
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+
+# Inscription publique : autoriser n'importe qui sur Internet à créer un compte.
+#
+# « Secure by default » : ouverte en développement (confort), FERMÉE en production
+# (sinon n'importe qui peut consommer vos ressources et votre budget GPU).
+#
+# Pour un pilote avec quelques testeurs :
+#   1. laisser fermé (ALLOW_REGISTRATION=false, ou rien en production) ;
+#   2. créer les comptes un par un avec : python scripts/create_user.py <nom>
+ALLOW_REGISTRATION = _env_flag("ALLOW_REGISTRATION", ENVIRONMENT != "production")
 
 
 def using_default_secret_key() -> bool:

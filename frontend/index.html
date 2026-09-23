@@ -421,11 +421,34 @@
                 .catch(() => showAuth());
         }
 
-        if (currentLang) {
-            applyLang();
-            langPanel.classList.add('hidden');
-            initAfterLang();
-        } else {
+        // --- Configuration publique (non sensible) ------------------------
+        async function loadPublicConfig() {
+            try {
+                const response = await fetch(API_BASE + '/config');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                // Inscription fermée (pilote) : on masque le bouton de création.
+                if (data.allow_registration === false) {
+                    registerBtn.classList.add('hidden');
+                }
+            } catch (err) {
+                // En cas d'échec on laisse le bouton visible : le backend
+                // refusera de toute façon si l'inscription est fermée.
+                console.error('Configuration publique indisponible:', err);
+            }
+        }
+
+        async function bootstrap() {
+            await loadPublicConfig();
+
+            if (currentLang) {
+                applyLang();
+                langPanel.classList.add('hidden');
+                initAfterLang();
+                return;
+            }
+
             // Aucune langue choisie : on affiche l'écran de sélection.
             authPanel.classList.add('hidden');
             chatWindow.classList.add('hidden');
@@ -434,6 +457,8 @@
             langBackBtn.classList.add('hidden');
             langPanel.classList.remove('hidden');
         }
+
+        bootstrap();
     </script>
 </body>
 </html>

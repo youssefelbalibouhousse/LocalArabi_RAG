@@ -67,11 +67,32 @@ def health():
     }
 
 
+@app.get("/config")
+def public_config():
+    """Paramètres publics (non sensibles) permettant au frontend de s'adapter.
+
+    Exposé volontairement sans authentification : ne jamais y mettre de secret.
+    """
+    return {
+        "allow_registration": config.ALLOW_REGISTRATION,
+        "languages": ["ar", "fr"],
+    }
+
+
 # --- Authentification ----------------------------------------------------
 
 @app.post("/register", response_model=UserRead)
 def register(data: UserCreate, session: Session = Depends(get_session)):
-    """Crée un nouveau compte."""
+    """Crée un nouveau compte (si l'inscription publique est autorisée)."""
+    if not config.ALLOW_REGISTRATION:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "L'inscription publique est désactivée. "
+                "Contactez l'administrateur pour obtenir un compte."
+            ),
+        )
+
     existing = session.exec(
         select(User).where(User.username == data.username)
     ).first()

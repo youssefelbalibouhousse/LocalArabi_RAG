@@ -5,7 +5,7 @@ La base de données est en mémoire (voir conftest.py) et le RAG est SIMULÉ
 Les tests restent rapides et reproductibles.
 """
 
-from app import rag
+from app import config, rag
 
 
 # --- Santé ---------------------------------------------------------------
@@ -15,6 +15,24 @@ def test_health_repond_ok(client):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+# --- Configuration publique ----------------------------------------------
+
+def test_config_publique_expose_allow_registration(client):
+    response = client.get("/config")
+
+    assert response.status_code == 200
+    assert "allow_registration" in response.json()
+    assert response.json()["languages"] == ["ar", "fr"]
+
+
+def test_config_publique_ne_fuite_aucun_secret(client):
+    """Garde-fou : cette route est publique, aucun secret ne doit y apparaître."""
+    texte = str(client.get("/config").json()).lower()
+
+    assert "secret" not in texte
+    assert "password" not in texte
 
 
 # --- Inscription ---------------------------------------------------------
@@ -49,6 +67,29 @@ def test_register_valide_le_corps_de_la_requete(client):
     response = client.post("/register", json={"username": "alice"})
 
     assert response.status_code == 422
+
+
+def test_register_refuse_si_inscription_desactivee(client, monkeypatch):
+    """Pilote : l'inscription publique peut être fermée aux inconnus."""
+    monkeypatch.setattr(config, "ALLOW_REGISTRATION", False)
+
+    response = client.post(
+        "/register",
+        json={"username": "intrus", "password": "secret123"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_register_autorise_si_inscription_activee(client, monkeypatch):
+    monkeypatch.setattr(config, "ALLOW_REGISTRATION", True)
+
+    response = client.post(
+        "/register",
+        json={"username": "alice", "password": "secret123"},
+    )
+
+    assert response.status_code == 200
 
 
 # --- Connexion -----------------------------------------------------------
