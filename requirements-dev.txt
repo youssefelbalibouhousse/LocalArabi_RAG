@@ -1,0 +1,11 @@
+# Dépendances de DÉVELOPPEMENT uniquement (tests).
+# Volontairement séparées de requirements.txt pour ne pas alourdir
+# l'image Docker de production.
+#
+# Installation : pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest
+httpx
+pytest-cov
