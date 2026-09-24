@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 
 from app import auth, config, main
 
-
 # --- Longueur de la clé --------------------------------------------------
 
 def test_cle_de_developpement_respecte_la_longueur_minimale():
@@ -54,9 +53,8 @@ def test_refuse_de_demarrer_en_production_sans_cle(monkeypatch):
     monkeypatch.setattr(config, "SECRET_KEY", config.DEV_SECRET_KEY)
     monkeypatch.setattr(config, "ENVIRONMENT", "production")
 
-    with pytest.raises(RuntimeError, match="SECRET_KEY"):
-        with TestClient(main.app):
-            pass
+    with pytest.raises(RuntimeError, match="SECRET_KEY"), TestClient(main.app):
+        pass
 
 
 def test_demarre_en_developpement_avec_la_cle_par_defaut(monkeypatch):

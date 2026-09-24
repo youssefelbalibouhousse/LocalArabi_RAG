@@ -70,7 +70,9 @@ def get_current_user(
         if username is None:
             raise credentials_exception
     except jwt.PyJWTError:
-        raise credentials_exception
+        # « from None » masque l'exception d'origine : on renvoie un message
+        # générique volontairement, sans exposer le détail interne du décodage.
+        raise credentials_exception from None
 
     user = session.exec(select(User).where(User.username == username)).first()
     if user is None:

@@ -3,9 +3,11 @@
 Aucun appel à Ollama ni à ChromaDB ici : on teste des fonctions pures.
 """
 
+from itertools import pairwise
 from types import SimpleNamespace
 
 import build_kb
+
 from app import config, rag
 
 PAGE_UNIQUE = [(1, "ligne un\nligne deux\nligne trois")]
@@ -48,7 +50,7 @@ def test_chunk_pages_produit_des_intervalles_de_lignes_contigus():
     chunks = build_kb.chunk_pages([(1, texte)], chunk_size=60)
 
     assert chunks[0]["line_start"] == 1
-    for precedent, suivant in zip(chunks, chunks[1:]):
+    for precedent, suivant in pairwise(chunks):
         assert suivant["line_start"] == precedent["line_end"] + 1
 
 

@@ -13,9 +13,10 @@ from pypdf import PdfReader
 # en rendant le package `app` importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import config  # noqa: E402
-from app.rag import get_embedding_function, get_ollama_client  # noqa: E402
-import chromadb  # noqa: E402
+import chromadb
+
+from app import config
+from app.rag import get_embedding_function, get_ollama_client
 
 
 def extract_arabic_pdf(pdf_path):
@@ -86,7 +87,7 @@ def check_ollama():
     try:
         get_ollama_client().list()
         return True
-    except Exception as exc:  # noqa: BLE001 - on veut un message clair, pas un crash
+    except Exception as exc:
         print(f"❌ Impossible de joindre Ollama sur {config.OLLAMA_URL}.")
         print(f"   Détail : {exc}")
         print("   Démarrez Ollama (ou la pile Docker : docker compose up -d) puis réessayez.")
@@ -132,10 +133,13 @@ def main():
 
     # 3. Reconstruire la collection seulement maintenant (tout est prêt).
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
-    try:
+
+    # On supprime l'ancienne collection si elle existe. Vérifier explicitement
+    # évite un try/except aveugle : supprimer une collection absente lèverait
+    # une exception, alors que c'est un cas parfaitement normal au 1er lancement.
+    noms_existants = {c.name for c in client.list_collections()}
+    if config.COLLECTION_NAME in noms_existants:
         client.delete_collection(name=config.COLLECTION_NAME)
-    except Exception:
-        pass  # la collection n'existait pas encore
 
     collection = client.create_collection(
         name=config.COLLECTION_NAME,

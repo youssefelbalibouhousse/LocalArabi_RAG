@@ -9,7 +9,6 @@ import pytest
 
 from app import auth, config
 
-
 # --- Hachage des mots de passe -------------------------------------------
 
 def test_hash_ne_stocke_pas_le_mot_de_passe_en_clair():

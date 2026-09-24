@@ -20,11 +20,11 @@ from pathlib import Path
 # en rendant le package `app` importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlmodel import Session, select  # noqa: E402
+from sqlmodel import Session, select
 
-from app import auth  # noqa: E402
-from app.database import create_db_and_tables, engine  # noqa: E402
-from app.models import User  # noqa: E402
+from app import auth
+from app.database import create_db_and_tables, engine
+from app.models import User
 
 
 def main() -> int:

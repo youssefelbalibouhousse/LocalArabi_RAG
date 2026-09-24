@@ -99,7 +99,7 @@ def retrieve(collection, question, n_results=None):
     threshold = config.DISTANCE_THRESHOLD
     filtered_docs, sources = [], []
 
-    for doc, meta, distance in zip(docs, metadatas, distances):
+    for doc, meta, distance in zip(docs, metadatas, distances, strict=True):
         if not meta:
             continue
         if threshold > 0 and distance is not None and distance > threshold:
@@ -190,7 +190,7 @@ def format_excerpts(docs, sources, language="ar", max_chars=200):
     """
     header = "📄 Extraits cités :" if language == "fr" else "📄 المقتطفات:"
     items = []
-    for i, (doc, src) in enumerate(zip(docs, sources), start=1):
+    for i, (doc, src) in enumerate(zip(docs, sources, strict=True), start=1):
         text = (doc or "").strip().replace("\n", " ")
         if len(text) > max_chars:
             text = text[:max_chars].rstrip() + "…"

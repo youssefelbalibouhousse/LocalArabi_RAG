@@ -7,7 +7,6 @@ Les tests restent rapides et reproductibles.
 
 from app import config, rag
 
-
 # --- Santé ---------------------------------------------------------------
 
 def test_health_repond_ok(client):
