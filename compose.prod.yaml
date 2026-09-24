@@ -1,0 +1,37 @@
+# Surcharge de PRODUCTION — à combiner avec compose.yaml.
+#
+# Usage :
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+#
+# Elle ajoute Caddy en façade HTTPS et cesse d'exposer l'API directement sur
+# Internet : seul Caddy parle au monde extérieur.
+
+services:
+  # --- Caddy : terminaison TLS + reverse proxy ---------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"    # requis par le challenge ACME de Let's Encrypt (+ redirection HTTPS)
+      - "443:443"  # trafic HTTPS
+    environment:
+      # La syntaxe ":?" rend la variable OBLIGATOIRE : Docker refuse de démarrer
+      # et affiche ce message si DOMAIN est absente (principe « fail fast »).
+      - DOMAIN=${DOMAIN:?Définissez DOMAIN dans .env, ex. chatbot.mondomaine.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data        # certificats TLS — À SAUVEGARDER
+      - caddy_config:/config    # état interne de Caddy
+    depends_on:
+      - api
+
+  # --- API : plus de port publié -----------------------------------------
+  api:
+    # En production, l'API ne doit plus être joignable directement depuis
+    # Internet : tout le trafic passe par Caddy, qui gère le HTTPS.
+    # "!reset" remplace la liste au lieu de la fusionner avec celle de compose.yaml.
+    ports: !reset []
+
+volumes:
+  caddy_data:
+  caddy_config:

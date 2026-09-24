@@ -65,6 +65,67 @@ docker compose exec -T ollama ollama list   # lister les modèles disponibles
 docker compose run --rm api python scripts/build_kb.py
 ```
 
+## Déploiement en PRODUCTION (pilote avec testeurs externes)
+
+En production, on ajoute **Caddy** en façade : il obtient et renouvelle
+automatiquement le certificat **HTTPS**, et l'API n'est plus exposée directement.
+
+### Prérequis
+
+1. Un **serveur** (VPS) avec Docker installé, accessible sur Internet.
+2. Un **nom de domaine** dont l'enregistrement DNS **A** pointe vers l'IP du serveur.
+3. Les ports **80** et **443** ouverts dans le pare-feu.
+
+> ℹ️ Let's Encrypt ne délivre pas de certificat pour une IP ou pour `localhost` :
+> le nom de domaine est indispensable.
+
+### Étapes
+
+```bash
+# 1. Créer le fichier .env à partir du modèle
+cp .env.example .env
+
+# 2. Renseigner les valeurs de PRODUCTION (voir ci-dessous)
+
+# 3. Démarrer la pile complète (base + surcharge de production)
+docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+
+# 4. Créer les comptes des testeurs (l'inscription publique est fermée)
+docker compose run --rm api python scripts/create_user.py testeur1
+```
+
+Contenu minimal du `.env` de production :
+
+```bash
+DOMAIN=chatbot.mondomaine.com
+ENVIRONMENT=production          # ferme l'inscription + refuse la clé de dev
+ALLOW_REGISTRATION=false
+SECRET_KEY=<python -c "import secrets; print(secrets.token_hex(32))">
+```
+
+### Vérifications
+
+```bash
+docker compose ps                       # api (healthy), caddy, ollama
+docker compose logs -f caddy            # obtention du certificat + requêtes
+curl -I https://chatbot.mondomaine.com  # doit répondre 200 en HTTPS
+```
+
+### Ce qui change par rapport au développement
+
+| | Développement | Production |
+|---|---|---|
+| Point d'entrée | `http://localhost:8000` | `https://<DOMAIN>` (port 443) |
+| Accès à l'API | direct sur le port 8000 | **uniquement via Caddy** |
+| Certificat TLS | aucun | Let's Encrypt, renouvelé automatiquement |
+| Inscription publique | ouverte | **fermée** |
+
+### ⚠️ À sauvegarder
+
+- Le volume **`caddy_data`** (contient les certificats TLS — les perdre force
+  une réémission, ce qui est limité en fréquence par Let's Encrypt).
+- Le dossier **`data/`** (comptes utilisateurs) et **`chroma_db/`** (base vectorielle).
+
 ## Première installation des modèles (une seule fois)
 
 Les modèles se trouvent dans le volume Docker `ollama`. Deux options :

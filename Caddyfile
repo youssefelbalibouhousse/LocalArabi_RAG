@@ -1,0 +1,32 @@
+# Caddyfile — reverse proxy de production.
+#
+# Caddy obtient et renouvelle AUTOMATIQUEMENT le certificat HTTPS (Let's Encrypt)
+# via le protocole ACME : aucune commande à lancer, aucune date d'expiration à
+# surveiller, aucun cron de renouvellement.
+#
+# {$DOMAIN} est lu depuis la variable d'environnement DOMAIN (voir .env).
+
+{$DOMAIN} {
+	# Compresse les réponses (HTML, JSON) : moins de bande passante consommée.
+	encode zstd gzip
+
+	# Tout le trafic part vers l'API FastAPI, qui sert aussi le frontend.
+	# Caddy termine le TLS et parle en HTTP clair sur le réseau Docker interne.
+	reverse_proxy api:8000
+
+	# Journalise les requêtes (consultables : docker compose logs caddy).
+	log {
+		output stdout
+		format console
+	}
+}
+
+# --- Variante locale (sans nom de domaine) -------------------------------
+# Pour tester Caddy en local, commenter le bloc ci-dessus et décommenter :
+#
+# localhost {
+# 	reverse_proxy api:8000
+# }
+#
+# Caddy utilise alors sa propre autorité de certification interne
+# (le navigateur affichera un avertissement : c'est normal en local).
