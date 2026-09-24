@@ -1,5 +1,7 @@
 # Chatbot RAG arabe
 
+[![CI](https://github.com/youssefelbalibouhousse/LocalArabi_RAG/actions/workflows/ci.yml/badge.svg)](https://github.com/youssefelbalibouhousse/LocalArabi_RAG/actions/workflows/ci.yml)
+
 Chatbot de questions/réponses en arabe sur des documents PDF, basé sur
 **FastAPI**, **ChromaDB** et **Ollama** (embeddings `bge-m3`, génération `llama3.1`).
 Chaque réponse cite ses sources : fichier, page et intervalle de lignes.
@@ -87,3 +89,28 @@ docker compose down
 
 Les volumes `./chroma_db` et `./data` sont montés depuis le projet : les données
 sont donc partagées entre le lancement local (`uvicorn`) et Docker.
+
+Déploiement en production (HTTPS, comptes des testeurs) : voir `docs/DEPLOIEMENT.md`.
+
+## Tests et qualité du code
+
+```bash
+pip install -r requirements-dev.txt   # dépendances de développement (une fois)
+
+pytest                                # suite de tests (~58 tests)
+pytest --cov=app --cov=scripts        # avec la couverture de code
+ruff check .                          # analyse statique
+```
+
+Ces deux commandes tournent automatiquement à chaque `git push` (voir
+`.github/workflows/ci.yml`) : une Pull Request ne peut pas être fusionnée si
+les tests ou l'analyse statique échouent.
+
+## Choix techniques
+
+| Sujet | Décision |
+|---|---|
+| Configuration | `app/config.py` est la **source unique de vérité**, surchargeable par variables d'environnement |
+| Fournisseur LLM | `LLM_PROVIDER=ollama` (auto-hébergé) ou `openai` (Groq, Together, vLLM…) |
+| Inscription | Ouverte en développement, **fermée par défaut en production** |
+| Clé JWT | Minimum 32 octets (RFC 7518) ; l'application refuse de démarrer en production avec la clé de développement |

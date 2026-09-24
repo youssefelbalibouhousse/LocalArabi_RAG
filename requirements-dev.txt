@@ -1,4 +1,4 @@
-# Dépendances de DÉVELOPPEMENT uniquement (tests).
+# Dépendances de DÉVELOPPEMENT uniquement (tests et qualité du code).
 # Volontairement séparées de requirements.txt pour ne pas alourdir
 # l'image Docker de production.
 #
@@ -9,3 +9,4 @@
 pytest
 httpx
 pytest-cov
+ruff

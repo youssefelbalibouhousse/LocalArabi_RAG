@@ -1,0 +1,30 @@
+# Configuration des outils de qualité de code.
+# Ruff remplace flake8 + isort + pyupgrade + bugbear en un seul outil.
+
+[tool.ruff]
+# Version de Python ciblée (cohérente avec le README : 3.10+).
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# Jeu de règles EXPLICITE et volontairement restreint.
+# Les valeurs par défaut de ruff évoluent d'une version à l'autre : les figer
+# évite qu'une mise à jour de l'outil fasse échouer la CI sans changement de code.
+select = [
+    "E4",   # pycodestyle : imports mal placés
+    "E7",   # pycodestyle : code mort, comparaisons douteuses
+    "E9",   # pycodestyle : erreurs de runtime (syntaxe)
+    "F",    # pyflakes : variables inutilisées, imports manquants
+    "I",    # isort : ordre des imports
+    "B",    # flake8-bugbear : pièges classiques
+    "SIM",  # flake8-simplify : simplifications
+    "UP",   # pyupgrade : syntaxe moderne
+    "RUF",  # règles propres à ruff
+]
+
+ignore = [
+    # FastAPI identifie les dépendances via `param = Depends(...)` dans la
+    # signature. C'est le pattern officiel du framework : bugbear le signale
+    # à tort comme un appel de fonction en valeur par défaut.
+    "B008",
+]

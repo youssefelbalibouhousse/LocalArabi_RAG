@@ -1,0 +1,78 @@
+# Intégration Continue (CI) — exécutée à chaque push et à chaque Pull Request.
+#
+# Trois garde-fous indépendants :
+#   1. lint   : le code respecte les règles de qualité (ruff)
+#   2. tests  : les 58 tests passent
+#   3. docker : l'image de production se construit toujours
+#
+# Si un seul échoue, la Pull Request ne peut pas être fusionnée.
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# Annule l'exécution précédente si l'on pousse à nouveau sur la même branche :
+# inutile de gaspiller des minutes de CI sur une version déjà obsolète.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --- 1. Qualité du code -------------------------------------------------
+  lint:
+    name: Qualité du code (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer les dépendances de développement
+        run: pip install -r requirements-dev.txt
+
+      - name: Analyser le code
+        run: ruff check .
+
+  # --- 2. Tests -----------------------------------------------------------
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          # Met en cache les paquets pip : CI nettement plus rapide ensuite.
+          cache: pip
+
+      - name: Installer les dépendances de développement
+        run: pip install -r requirements-dev.txt
+
+      - name: Lancer les tests
+        # Aucune dépendance externe n'est requise : les tests utilisent une base
+        # en mémoire et simulent le RAG (pas d'appel à Ollama ni à ChromaDB).
+        run: pytest --cov=app --cov=scripts --cov-report=term-missing
+
+  # --- 3. Construction de l'image de production ---------------------------
+  docker:
+    name: Construction de l'image Docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Construire l'image
+        # On ne démarre PAS les conteneurs : on vérifie seulement que le
+        # Dockerfile reste constructible (détecte les dépendances cassées).
+        run: docker build -t arabic-rag-chatbot:ci .
