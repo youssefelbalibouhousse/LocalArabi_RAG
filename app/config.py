@@ -36,6 +36,27 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
 
 # Ollama / génération
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+# --- Fournisseur du modèle de génération ---------------------------------
+# "ollama" : serveur Ollama auto-hébergé (local ou VM GPU louée) — défaut.
+# "openai" : toute API compatible OpenAI (Groq, Together, vLLM, OpenRouter,
+#            LM Studio, serveur d'inférence maison...).
+# Les embeddings (bge-m3) restent servis par Ollama dans tous les cas.
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
+
+# URL de base de l'API (utile uniquement si LLM_PROVIDER="openai").
+# Exemples : https://api.groq.com/openai/v1
+#            https://api.together.xyz/v1
+#            http://localhost:8000/v1  (serveur local compatible OpenAI)
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip()
+
+# Clé d'API du fournisseur (utile uniquement si LLM_PROVIDER="openai").
+# Certains serveurs locaux n'en exigent pas : la valeur par défaut suffit alors.
+LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
+
+# Modèle utilisé pour la génération.
+# Exemples : "llama3.1" (Ollama), "llama-3.1-8b-instant" (Groq),
+#            "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" (Together).
 LLM_MODEL = os.getenv("LLM_MODEL", "llama3.1")
 
 # Paramètres RAG
@@ -62,6 +83,10 @@ DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data' / 'app.d
 # Environnement d'exécution : "development" (défaut) ou "production".
 # En production, l'application refuse de démarrer avec la clé de développement.
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
+
+# Niveau de journalisation de l'application : DEBUG, INFO, WARNING, ERROR.
+# Passer à DEBUG pour diagnostiquer un problème en production.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 
 # Clé de signature des jetons JWT.
 # Contraintes : au moins 32 octets (RFC 7518, algorithme HS256).

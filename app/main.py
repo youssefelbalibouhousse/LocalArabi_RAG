@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Journalisation : sans handler sur le logger racine, les messages INFO de
+    # l'application seraient ignorés (seuls WARNING et au-dessus passent).
+    # Uvicorn configure ses propres loggers séparément : pas de doublon.
+    logging.basicConfig(
+        level=config.LOG_LEVEL,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     # Au démarrage : crée le fichier de base et les tables si nécessaire.
     create_db_and_tables()
 
@@ -35,6 +43,26 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "SECRET_KEY utilise la clé de développement par défaut. "
             "Définissez SECRET_KEY avant tout déploiement en production."
+        )
+
+    # Trace le fournisseur de génération utilisé (indispensable en exploitation).
+    if config.LLM_PROVIDER == "openai":
+        logger.info(
+            "Fournisseur LLM : API compatible OpenAI (%s, modèle %s)",
+            config.LLM_BASE_URL or "URL par défaut",
+            config.LLM_MODEL,
+        )
+    else:
+        if config.LLM_PROVIDER != "ollama":
+            logger.warning(
+                "LLM_PROVIDER=%r inconnu : repli sur Ollama. "
+                "Valeurs acceptées : 'ollama', 'openai'.",
+                config.LLM_PROVIDER,
+            )
+        logger.info(
+            "Fournisseur LLM : Ollama (%s, modèle %s)",
+            config.OLLAMA_URL,
+            config.LLM_MODEL,
         )
 
     yield

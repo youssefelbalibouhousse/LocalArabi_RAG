@@ -3,8 +3,10 @@
 Aucun appel à Ollama ni à ChromaDB ici : on teste des fonctions pures.
 """
 
+from types import SimpleNamespace
+
 import build_kb
-from app import rag
+from app import config, rag
 
 PAGE_UNIQUE = [(1, "ligne un\nligne deux\nligne trois")]
 
@@ -97,3 +99,96 @@ def test_format_excerpts_est_bilingue():
 
     assert "Extraits cités" in rag.format_excerpts(docs, SOURCE, "fr")
     assert "المقتطفات" in rag.format_excerpts(docs, SOURCE, "ar")
+
+
+# --- Invite envoyée au modèle --------------------------------------------
+
+def test_build_prompt_francais_contient_contexte_et_question():
+    prompt = rag.build_prompt("Quelle est la règle ?", "un contexte", "fr")
+
+    assert "un contexte" in prompt
+    assert "Quelle est la règle ?" in prompt
+    assert "français" in prompt
+
+
+def test_build_prompt_arabe_contient_contexte_et_question():
+    prompt = rag.build_prompt("ما الحكم؟", "سياق", "ar")
+
+    assert "سياق" in prompt
+    assert "ما الحكم؟" in prompt
+    assert "باللغة العربية" in prompt
+
+
+# --- Choix du fournisseur de génération ----------------------------------
+
+class _FakeOpenAI:
+    """Doublure du client OpenAI : enregistre les appels et renvoie un texte fixe.
+
+    `self.chat = self` et `self.completions = self` reproduisent la chaîne
+    d'appel réelle `client.chat.completions.create(...)` sans réseau.
+    """
+
+    def __init__(self, texte):
+        self.texte = texte
+        self.appels = []
+        self.chat = self
+        self.completions = self
+
+    def create(self, **kwargs):
+        self.appels.append(kwargs)
+        message = SimpleNamespace(content=self.texte)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+class _FakeOllama:
+    """Doublure du client Ollama."""
+
+    def __init__(self, texte):
+        self.texte = texte
+        self.appels = []
+
+    def chat(self, **kwargs):
+        self.appels.append(kwargs)
+        return {"message": {"content": self.texte}}
+
+
+def test_generate_utilise_ollama_par_defaut(monkeypatch):
+    faux = _FakeOllama("Réponse locale.")
+    monkeypatch.setattr(config, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(rag, "get_ollama_client", lambda: faux)
+
+    resultat = rag.generate("question", "contexte", "ar")
+
+    assert resultat == "Réponse locale."
+    assert faux.appels[0]["model"] == config.LLM_MODEL
+    assert "contexte" in faux.appels[0]["messages"][0]["content"]
+
+
+def test_generate_utilise_api_openai_si_configuree(monkeypatch):
+    faux = _FakeOpenAI("Réponse cloud.")
+    monkeypatch.setattr(config, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(rag, "get_openai_client", lambda: faux)
+
+    resultat = rag.generate("question", "contexte", "fr")
+
+    assert resultat == "Réponse cloud."
+    assert faux.appels[0]["model"] == config.LLM_MODEL
+    assert "contexte" in faux.appels[0]["messages"][0]["content"]
+
+
+def test_generate_retombe_sur_ollama_si_fournisseur_inconnu(monkeypatch):
+    """Un nom de fournisseur mal orthographié ne doit pas casser le service."""
+    faux = _FakeOllama("Repli local.")
+    monkeypatch.setattr(config, "LLM_PROVIDER", "opnai")  # faute de frappe
+    monkeypatch.setattr(rag, "get_ollama_client", lambda: faux)
+
+    assert rag.generate("question", "contexte", "ar") == "Repli local."
+
+
+def test_generate_renvoie_une_chaine_meme_si_le_cloud_repond_vide(monkeypatch):
+    """Une réponse vide du fournisseur ne doit jamais produire None."""
+    faux = _FakeOpenAI(None)
+    monkeypatch.setattr(config, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(rag, "get_openai_client", lambda: faux)
+
+    assert rag.generate("question", "contexte", "fr") == ""

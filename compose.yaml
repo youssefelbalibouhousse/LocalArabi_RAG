@@ -42,12 +42,21 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      # Dans le réseau Docker, Ollama est joignable via son nom de service.
-      - OLLAMA_URL=http://ollama:11434
+      # Par défaut : le conteneur Ollama du même réseau Docker.
+      # Surchargeable pour viser un Ollama distant (VM GPU louée) :
+      #   OLLAMA_URL=http://mon-gpu.example.com:11434
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      # Fournisseur de génération : "ollama" ou "openai" (API compatible OpenAI).
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-llama3.1}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
       # Valeurs de développement par défaut ; surchargées en production via .env :
       #   SECRET_KEY=<clé générée>  et  ENVIRONMENT=production
       - SECRET_KEY=${SECRET_KEY:-dev-only-secret-key-change-me-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      # Niveau de journalisation (DEBUG pour diagnostiquer un incident).
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # Vide => logique par défaut : ouverte en dev, fermée en production.
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-}
       - CORS_ALLOW_ORIGINS=*

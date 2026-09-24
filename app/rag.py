@@ -18,6 +18,7 @@ from app import config
 _client = None
 _collection = None
 _ollama_client = None
+_openai_client = None
 
 
 def get_embedding_function():
@@ -53,6 +54,25 @@ def get_ollama_client():
     if _ollama_client is None:
         _ollama_client = ollama.Client(host=config.OLLAMA_URL)
     return _ollama_client
+
+
+def get_openai_client():
+    """Retourne un client pour toute API compatible OpenAI (une seule fois).
+
+    L'import est paresseux : le paquet `openai` n'est chargé que si ce
+    fournisseur est réellement utilisé (inutile en mode Ollama).
+    """
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+
+        _openai_client = OpenAI(
+            base_url=config.LLM_BASE_URL or None,
+            # Certains serveurs locaux (vLLM, LM Studio) n'exigent pas de clé,
+            # mais le SDK refuse une valeur vide.
+            api_key=config.LLM_API_KEY or "not-needed",
+        )
+    return _openai_client
 
 
 def retrieve(collection, question, n_results=None):
@@ -95,22 +115,18 @@ def retrieve(collection, question, n_results=None):
     return filtered_docs, sources
 
 
-def generate(question, context, language="ar"):
-    """Envoie le contexte + la question au LLM et retourne la réponse dans la langue demandée.
-
-    `language` : "ar" (arabe) ou "fr" (français). Le modèle lit le contexte
-    (qui peut être en arabe) et rédige sa réponse dans la langue cible.
-    """
+def build_prompt(question, context, language="ar"):
+    """Construit l'invite envoyée au modèle, dans la langue demandée."""
     if language == "fr":
-        augmented_prompt = f"""Utilise uniquement le contexte suivant pour répondre précisément à la question, en français. Si le contexte ne contient pas la réponse, dis : « Désolé, il n'y a pas assez d'informations dans les documents fournis. ».
+        return f"""Utilise uniquement le contexte suivant pour répondre précisément à la question, en français. Si le contexte ne contient pas la réponse, dis : « Désolé, il n'y a pas assez d'informations dans les documents fournis. ».
 
 Contexte extrait :
 {context}
 
 Question : {question}
 Réponse :"""
-    else:
-        augmented_prompt = f"""استخدم السياق التالي فقط للإجابة على السؤال بدقة باللغة العربية. إذا كان السياق لا يحتوي على الإجابة، قل "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة".
+
+    return f"""استخدم السياق التالي فقط للإجابة على السؤال بدقة باللغة العربية. إذا كان السياق لا يحتوي على الإجابة، قل "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة".
 
 السياق المستخرج:
 {context}
@@ -118,9 +134,29 @@ Réponse :"""
 السؤال: {question}
 الإجابة:"""
 
+
+def generate(question, context, language="ar"):
+    """Envoie l'invite au fournisseur configuré et retourne la réponse.
+
+    Le fournisseur est choisi par `config.LLM_PROVIDER` :
+      - "ollama" : serveur Ollama auto-hébergé (défaut) ;
+      - "openai" : toute API compatible OpenAI (Groq, Together, vLLM, ...).
+
+    `language` : "ar" (arabe) ou "fr" (français). Le modèle lit le contexte
+    (qui peut être en arabe) et rédige sa réponse dans la langue cible.
+    """
+    prompt = build_prompt(question, context, language)
+
+    if config.LLM_PROVIDER == "openai":
+        response = get_openai_client().chat.completions.create(
+            model=config.LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content or ""
+
     response = get_ollama_client().chat(
         model=config.LLM_MODEL,
-        messages=[{"role": "user", "content": augmented_prompt}],
+        messages=[{"role": "user", "content": prompt}],
     )
     return response["message"]["content"]
 
