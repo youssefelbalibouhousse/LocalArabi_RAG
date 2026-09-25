@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 from app import auth, config, rag
 from app.database import create_db_and_tables, get_session
 from app.models import User
+from app.ratelimit import RateLimit
 from app.schemas import Token, UserCreate, UserRead
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,20 @@ async def lifespan(app: FastAPI):
             config.LLM_MODEL,
         )
 
+    # Trace les limites de débit actives (permet de vérifier un réglage).
+    if config.RATE_LIMIT_ENABLED:
+        logger.info(
+            "Limitation de débit : login %d/%ds, register %d/%ds, ask %d/%ds",
+            *config.LOGIN_RATE_LIMIT,
+            *config.REGISTER_RATE_LIMIT,
+            *config.ASK_RATE_LIMIT,
+        )
+    else:
+        logger.warning(
+            "Limitation de débit DÉSACTIVÉE (RATE_LIMIT_ENABLED=false) : "
+            "l'API est exposée aux attaques par force brute et à l'épuisement de budget."
+        )
+
     yield
     # (rien à nettoyer à l'arrêt pour l'instant)
 
@@ -80,6 +95,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Limiteurs de débit, un par route sensible (chaque limiteur a son propre
+# compteur, donc les limites ne se « mélangent » pas entre les routes).
+login_rate_limit = RateLimit(*config.LOGIN_RATE_LIMIT)
+register_rate_limit = RateLimit(*config.REGISTER_RATE_LIMIT)
+ask_rate_limit = RateLimit(*config.ASK_RATE_LIMIT)
 
 
 # --- Santé / info --------------------------------------------------------
@@ -109,7 +130,11 @@ def public_config():
 
 # --- Authentification ----------------------------------------------------
 
-@app.post("/register", response_model=UserRead)
+@app.post(
+    "/register",
+    response_model=UserRead,
+    dependencies=[Depends(register_rate_limit)],
+)
 def register(data: UserCreate, session: Session = Depends(get_session)):
     """Crée un nouveau compte (si l'inscription publique est autorisée)."""
     if not config.ALLOW_REGISTRATION:
@@ -140,7 +165,11 @@ def register(data: UserCreate, session: Session = Depends(get_session)):
     return user
 
 
-@app.post("/login", response_model=Token)
+@app.post(
+    "/login",
+    response_model=Token,
+    dependencies=[Depends(login_rate_limit)],
+)
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     session: Session = Depends(get_session),
@@ -167,7 +196,7 @@ def read_me(user: User = Depends(auth.get_current_user)):
 
 # --- Chatbot (protégé) ---------------------------------------------------
 
-@app.get("/ask")
+@app.get("/ask", dependencies=[Depends(ask_rate_limit)])
 def ask(
     question: str,
     language: str = "ar",

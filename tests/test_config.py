@@ -94,3 +94,36 @@ def test_env_flag_vide_renvoie_le_defaut(monkeypatch):
     monkeypatch.setenv("TEST_FLAG", "")
 
     assert config._env_flag("TEST_FLAG", True) is True
+
+
+# --- Lecture des limites de débit ----------------------------------------
+
+def test_parse_rate_limit_lit_le_format_n_sur_fenetre(monkeypatch):
+    monkeypatch.setenv("TEST_RATE", "10/120")
+
+    assert config._parse_rate_limit("TEST_RATE", (1, 1)) == (10, 120)
+
+
+def test_parse_rate_limit_absente_renvoie_le_defaut(monkeypatch):
+    monkeypatch.delenv("TEST_RATE", raising=False)
+
+    assert config._parse_rate_limit("TEST_RATE", (5, 60)) == (5, 60)
+
+
+def test_parse_rate_limit_vide_renvoie_le_defaut(monkeypatch):
+    monkeypatch.setenv("TEST_RATE", "")
+
+    assert config._parse_rate_limit("TEST_RATE", (5, 60)) == (5, 60)
+
+
+@pytest.mark.parametrize(
+    "valeur",
+    ["abc", "5", "5/", "/60", "5/60/70", "5/0", "0/60", "-1/60"],
+)
+def test_parse_rate_limit_refuse_les_valeurs_invalides(monkeypatch, valeur):
+    """Fail fast : une limite illisible doit empêcher le démarrage plutôt que
+    d'appliquer silencieusement une protection différente de celle voulue."""
+    monkeypatch.setenv("TEST_RATE", valeur)
+
+    with pytest.raises(ValueError, match="TEST_RATE"):
+        config._parse_rate_limit("TEST_RATE", (5, 60))

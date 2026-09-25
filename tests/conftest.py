@@ -13,6 +13,19 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app import main
 from app.database import get_session
+from app.ratelimit import RateLimit
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Remet les compteurs de limitation de débit à zéro avant chaque test.
+
+    Sans cela, les tests s'épuiseraient les uns les autres : la fixture
+    `auth_headers` consomme une inscription et une connexion par test.
+    """
+    RateLimit.reset_all()
+    yield
+    RateLimit.reset_all()
 
 
 @pytest.fixture(name="engine")

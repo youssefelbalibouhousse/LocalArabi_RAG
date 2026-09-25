@@ -59,6 +59,11 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # Vide => logique par défaut : ouverte en dev, fermée en production.
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-}
+      # Limitation de débit : format « N/FENÊTRE » en secondes (vide => défauts).
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-}
+      - LOGIN_RATE_LIMIT=${LOGIN_RATE_LIMIT:-}
+      - REGISTER_RATE_LIMIT=${REGISTER_RATE_LIMIT:-}
+      - ASK_RATE_LIMIT=${ASK_RATE_LIMIT:-}
       - CORS_ALLOW_ORIGINS=*
     volumes:
       # On monte les dossiers locaux pour que la base vectorielle et les
