@@ -12,17 +12,30 @@ Chaque réponse cite ses sources : fichier, page et intervalle de lignes.
 app/
 ├── config.py        # Configuration centralisée (chemins, modèles, URL)
 ├── rag.py           # Logique RAG : récupération + génération
-└── main.py          # API FastAPI (route /ask)
+├── language.py      # Détection arabe/français (respect de la langue)
+├── auth.py          # JWT + hachage des mots de passe
+├── ratelimit.py     # Limitation de débit (fenêtre glissante)
+└── main.py          # API FastAPI (routes)
+frontend/
+├── index.html       # Balisage
+├── app.js           # Logique du client
+├── css/input.css    # SOURCE de la feuille de styles — à modifier
+└── app.css          # Feuille COMPILÉE (non versionnée)
 scripts/
-└── build_kb.py      # Ingestion des PDF → base vectorielle
+├── build_kb.py          # Ingestion des PDF → base vectorielle
+├── backup.py            # Sauvegarde + vérification + restauration
+├── schedule_backup.py   # Sauvegarde quotidienne automatique
+└── create_user.py       # Création d'un compte en ligne de commande
+tests/               # Suite pytest
 data/documents/      # Déposer ici les PDF à indexer
-frontend/index.html  # Interface web simple
 chroma_db/           # Base vectorielle générée (non versionnée)
 ```
 
 ## Prérequis
 
 - Python 3.10+
+- **Node.js 20+** — uniquement pour compiler la feuille de styles du frontend
+  (l'application elle-même reste 100 % Python à l'exécution)
 - [Ollama](https://ollama.com/) installé et lancé, avec les modèles nécessaires :
   ```bash
   ollama pull bge-m3
@@ -35,9 +48,20 @@ chroma_db/           # Base vectorielle générée (non versionnée)
 python -m venv venv
 venv/Scripts/activate          # Windows
 pip install -r requirements.txt
+
+npm install                    # outils de compilation de la feuille de styles
+npm run build:css              # produit frontend/app.css
 ```
 
 Optionnel : copier `.env.example` en `.env` pour surcharger la configuration.
+
+> 💡 `frontend/app.css` est un **artefact de build**, au même titre qu'un `.pyc` :
+> il n'est **pas versionné**. La source est `frontend/css/input.css`. Après toute
+> modification du balisage ou de la feuille, relancez `npm run build:css`
+> (ou `npm run watch:css` pendant le développement).
+>
+> En Docker, rien à installer : l'image compile la feuille elle-même
+> (build multi-étapes, Node n'existe que le temps de la compilation).
 
 ## Utilisation
 

@@ -238,6 +238,42 @@ Trois copies, sur deux supports différents, dont **une hors site**. Un disque
 externe, un NAS distant ou un stockage objet (`rclone`, `scp`, Backblaze B2…)
 couvrent le dernier « 1 » — le seul qui sauve lors d'un vrai sinistre.
 
+## Modifier l'apparence du frontend
+
+Le frontend est stylé par une feuille **compilée** (`frontend/app.css`), qui
+n'est pas versionnée : on modifie la source, puis on compile.
+
+```bash
+npm install            # une seule fois
+npm run build:css      # compile frontend/css/input.css -> frontend/app.css
+npm run watch:css      # recompile automatiquement à chaque modification
+```
+
+| Fichier | Rôle |
+|---|---|
+| `frontend/css/input.css` | **La source** : jetons de design, typographie, composants |
+| `frontend/index.html` | Le balisage (classes sémantiques) |
+| `frontend/app.js` | La logique du client |
+| `frontend/app.css` | **Compilé** — ne jamais le modifier à la main |
+
+> ⚠️ **Ne jamais éditer `frontend/app.css`** : il est écrasé à chaque
+> compilation. Toute modification manuelle est perdue au build suivant.
+
+En Docker, la compilation est intégrée : l'image utilise un **build
+multi-étapes** (Node n'existe que dans la première étape, jamais dans l'image
+finale). `docker compose up --build` suffit donc — rien à installer sur le
+serveur.
+
+### Deux invariants à ne pas casser
+
+1. **Jamais de `letter-spacing` sur de l'arabe.** L'espacement casse la liaison
+   des lettres (الحروف المتصلة) : « محمد » devient « م ح م د ». Une seule ligne
+   de CSS peut rendre le texte illisible.
+2. **Jamais d'`@import "tailwindcss"` sans `source(none)`.** Sinon Tailwind
+   scanne tout le dossier du projet et le build local ne produit plus le même
+   fichier que le build Docker (20,7 Ko contre 13,3 Ko mesurés) — une classe
+   pouvait fonctionner en développement puis manquer en production.
+
 ## Première installation des modèles (une seule fois)
 
 Les modèles se trouvent dans le volume Docker `ollama`. Deux options :

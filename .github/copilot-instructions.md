@@ -17,6 +17,10 @@ sources (fichier, page, lignes). Voir `README.md` (usage) et `docs/DEPLOIEMENT.m
 - `app/auth.py` — bcrypt + JWT. `scripts/build_kb.py` — ingestion des PDF.
 - Le paramètre `language` (`"ar"` ou `"fr"`) traverse /ask → rag → réponse :
   toute nouvelle chaîne affichée à l'utilisateur doit être déclinée dans les 2 langues.
+- `frontend/` — balisage (`index.html`), logique (`app.js`) et **source** des styles
+  (`css/input.css`). `app.css` est **compilé** par Tailwind : ne jamais l'éditer.
+  Le frontend n'a aucune classe utilitaire écrite dans le HTML : tout passe par des
+  classes sémantiques définies dans `input.css`.
 
 ## Commandes
 
@@ -28,6 +32,8 @@ venv\Scripts\python.exe -m pytest      # suite de tests (doit rester verte)
 docker compose up -d --build           # lancer en conteneurs
 python scripts/backup.py               # sauvegarder les données
 python scripts/schedule_backup.py --status   # la sauvegarde auto est-elle planifiée ?
+npm run build:css                      # compiler la feuille de styles du frontend
+npm run watch:css                      # la recompiler en continu
 ```
 
 Reconstruire la base vectorielle : `python scripts/build_kb.py`
@@ -71,3 +77,10 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   même base SQLite en parallèle. La tâche planifiée utilise toujours `--verify --log`.
   Dans `backup.py`, ne pas retirer `--log` d'un contexte planifié : le planificateur ne
   conserve pas la sortie standard, donc un échec deviendrait invisible.
+- **Frontend** : le style vit dans `frontend/css/input.css` ; `frontend/app.css` est un
+  artefact **compilé** (non versionné, écrasé à chaque build) — ne jamais l'éditer à la
+  main. `@import "tailwindcss" source(none)` est indispensable : sans lui, Tailwind
+  scanne tout le dépôt et le build local diverge du build Docker. Enfin, **jamais de
+  `letter-spacing` sur de l'arabe** : l'espacement casse la liaison des lettres
+  (الحروف المتصلة). La typographie arabe se règle par la hauteur de ligne (1.85 mini)
+  et le choix de police, jamais par l'espacement des lettres.
