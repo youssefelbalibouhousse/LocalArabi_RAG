@@ -4,6 +4,8 @@ Partagée entre l'API (app.main) et le script d'ingestion (scripts.build_kb),
 pour éviter toute duplication de configuration.
 """
 
+import logging
+
 import chromadb
 import ollama
 from chromadb.utils.embedding_functions.ollama_embedding_function import (
@@ -11,6 +13,9 @@ from chromadb.utils.embedding_functions.ollama_embedding_function import (
 )
 
 from app import config
+from app.language import detect_language
+
+logger = logging.getLogger(__name__)
 
 # Connexions mises en cache pour ne pas recréer un client/une collection à
 # chaque requête, et pour ne pas charger Ollama au démarrage (chargement
@@ -116,26 +121,79 @@ def retrieve(collection, question, n_results=None):
 
 
 def build_prompt(question, context, language="ar"):
-    """Construit l'invite envoyée au modèle, dans la langue demandée."""
+    """Construit l'invite envoyée au modèle, dans la langue demandée.
+
+    ⚠️ La consigne de langue est volontairement placée **en fin d'invite**.
+
+    Les derniers tokens d'une invite pèsent davantage sur la génération : la
+    consigne la plus proche du point de départ de la réponse est donc la mieux
+    suivie. Placée au début, avant un long contexte arabe, elle était souvent
+    noyée — et le modèle « continuait » en arabe.
+
+    On précise aussi explicitement que les extraits sont en arabe : sans cela,
+    le modèle imite la langue du contexte, ce qui paraît naturel.
+    """
     if language == "fr":
-        return f"""Utilise uniquement le contexte suivant pour répondre précisément à la question, en français. Si le contexte ne contient pas la réponse, dis : « Désolé, il n'y a pas assez d'informations dans les documents fournis. ».
+        return f"""Utilise uniquement le contexte ci-dessous pour répondre précisément à la question. Si le contexte ne contient pas la réponse, dis : « Désolé, il n'y a pas assez d'informations dans les documents fournis. ».
 
 Contexte extrait :
 {context}
 
 Question : {question}
-Réponse :"""
 
-    return f"""استخدم السياق التالي فقط للإجابة على السؤال بدقة باللغة العربية. إذا كان السياق لا يحتوي على الإجابة، قل "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة".
+Consigne de langue, impérative : les extraits ci-dessus sont en arabe, mais tu dois rédiger ta réponse UNIQUEMENT EN FRANÇAIS. N'écris aucune phrase en arabe.
+
+Réponse en français :"""
+
+    return f"""استخدم السياق أدناه فقط للإجابة على السؤال بدقة. إذا كان السياق لا يحتوي على الإجابة، قل "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة".
 
 السياق المستخرج:
 {context}
 
 السؤال: {question}
-الإجابة:"""
+
+تنبيه إلزامي: يجب أن تكتب إجابتك باللغة العربية فقط، ولا تكتب أي جملة بلغة أخرى.
+
+الإجابة بالعربية:"""
 
 
-def generate(question, context, language="ar"):
+def build_repair_instruction(language):
+    """Consigne de reprise : demander une réécriture dans la bonne langue.
+
+    La réponse fautive est renvoyée au modèle comme message `assistant` (voir
+    `build_messages`) : il voit ainsi ce qu'il a produit et le corrige, au lieu
+    de repartir de zéro. C'est le principe d'un tour de conversation.
+    """
+    if language == "fr":
+        return (
+            "TA RÉPONSE PRÉCÉDENTE N'ÉTAIT PAS EN FRANÇAIS. "
+            "Réécris-la intégralement EN FRANÇAIS, sans une seule phrase en arabe. "
+            "Conserve exactement les mêmes informations et n'ajoute rien."
+        )
+
+    return (
+        "إجابتك السابقة لم تكن باللغة العربية. "
+        "أعد كتابتها كاملة باللغة العربية فقط، دون أي جملة بلغة أخرى. "
+        "احتفظ بنفس المعلومات ولا تضف شيئًا."
+    )
+
+
+def build_messages(question, context, language="ar", previous_answer=None):
+    """Construit la liste de messages envoyée au modèle.
+
+    Sans `previous_answer` : un seul message. Avec : on ajoute la réponse fautive
+    puis la consigne de reprise, ce qui forme un tour de correction.
+    """
+    messages = [{"role": "user", "content": build_prompt(question, context, language)}]
+
+    if previous_answer:
+        messages.append({"role": "assistant", "content": previous_answer})
+        messages.append({"role": "user", "content": build_repair_instruction(language)})
+
+    return messages
+
+
+def generate(question, context, language="ar", previous_answer=None):
     """Envoie l'invite au fournisseur configuré et retourne la réponse.
 
     Le fournisseur est choisi par `config.LLM_PROVIDER` :
@@ -144,21 +202,77 @@ def generate(question, context, language="ar"):
 
     `language` : "ar" (arabe) ou "fr" (français). Le modèle lit le contexte
     (qui peut être en arabe) et rédige sa réponse dans la langue cible.
+
+    `previous_answer` : réponse à faire réécrire (voir `build_repair_instruction`).
     """
-    prompt = build_prompt(question, context, language)
+    messages = build_messages(question, context, language, previous_answer)
 
     if config.LLM_PROVIDER == "openai":
         response = get_openai_client().chat.completions.create(
             model=config.LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
         )
         return response.choices[0].message.content or ""
 
     response = get_ollama_client().chat(
         model=config.LLM_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
     )
     return response["message"]["content"]
+
+
+def answer_question(question, context, language="ar"):
+    """Génère la réponse et VÉRIFIE qu'elle est bien dans la langue demandée.
+
+    Stratégie de **défense en profondeur** — chaque couche rattrape les limites
+    de la précédente :
+
+    1. l'invite place déjà la consigne de langue en fin de texte (efficacité
+       probabiliste : on améliore les chances, sans garantie) ;
+    2. la langue RÉELLEMENT produite est détectée (efficacité déterministe :
+       aucune place au hasard) ;
+    3. si elle est fausse, une réécriture est demandée, dans la limite de
+       `config.LANGUAGE_MAX_RETRIES` (une reprise coûte un appel LLM).
+
+    Une langue indétectable (réponse vide, chiffres seuls, texte réellement
+    mélangé) est considérée comme **acceptable** : on ne peut rien prouver, et
+    relancer pour rien coûterait du temps GPU sans raison.
+    """
+    answer = generate(question, context, language)
+
+    if not config.LANGUAGE_ENFORCEMENT_ENABLED:
+        return answer
+
+    detected = detect_language(answer)
+    if detected is None or detected == language:
+        return answer
+
+    logger.info(
+        "Langue non respectée (%s au lieu de %s) : demande de réécriture.",
+        detected,
+        language,
+    )
+
+    for _ in range(config.LANGUAGE_MAX_RETRIES):
+        corrected = generate(question, context, language, previous_answer=answer)
+
+        if not corrected.strip():
+            # Réponse vide : rien d'exploitable, on garde la tentative précédente.
+            continue
+
+        detected = detect_language(corrected)
+        if detected is None or detected == language:
+            return corrected
+
+        answer = corrected
+
+    logger.warning(
+        "Langue toujours non respectée après %d reprise(s) : attendu %s, obtenu %s.",
+        config.LANGUAGE_MAX_RETRIES,
+        language,
+        detect_language(answer),
+    )
+    return answer
 
 
 def format_sources(sources, language="ar"):
