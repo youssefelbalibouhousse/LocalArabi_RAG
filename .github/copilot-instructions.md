@@ -64,3 +64,8 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   d'une base vivante peut être incohérente (« torn copy »). Toute restauration passe
   par une extraction en dossier temporaire, une vérification SHA-256, puis
   seulement l'écriture — ne pas court-circuiter cet ordre.
+- **Langue de la réponse** : toute route interrogeant le modèle doit passer par
+  `rag.answer_question()` et **jamais** par `rag.generate()` : c'est là que la langue
+  réellement produite est vérifiée (`app/language.py`) puis corrigée. Dans
+  `build_prompt`, la consigne de langue doit rester **en fin d'invite** — c'est
+  volontaire (les derniers tokens pèsent le plus), ne pas la remonter au début.

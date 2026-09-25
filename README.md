@@ -118,7 +118,7 @@ volume `caddy_data`, automatisation par cron).
 ```bash
 pip install -r requirements-dev.txt   # dépendances de développement (une fois)
 
-pytest                                # suite de tests (~105 tests)
+pytest                                # suite de tests (~138 tests)
 pytest --cov=app --cov=scripts        # avec la couverture de code
 ruff check .                          # analyse statique
 ```
@@ -135,3 +135,5 @@ les tests ou l'analyse statique échouent.
 | Fournisseur LLM | `LLM_PROVIDER=ollama` (auto-hébergé) ou `openai` (Groq, Together, vLLM…) |
 | Inscription | Ouverte en développement, **fermée par défaut en production** |
 | Clé JWT | Minimum 32 octets (RFC 7518) ; l'application refuse de démarrer en production avec la clé de développement |
+| Langue de la réponse | Consigne placée **en fin d'invite**, puis langue **réellement produite** vérifiée (`app/language.py`, comptage d'alphabet) et réécrite si besoin — la langue n'est pas laissée au bon vouloir du modèle |
+| Sauvegardes | Archives horodatées + empreintes SHA-256 ; copie SQLite via l'API de sauvegarde (pas de « torn copy ») |
