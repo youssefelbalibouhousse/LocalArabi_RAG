@@ -87,17 +87,38 @@ docker compose run --rm api python scripts/build_kb.py
 docker compose down
 ```
 
-Les volumes `./chroma_db` et `./data` sont montés depuis le projet : les données
-sont donc partagées entre le lancement local (`uvicorn`) et Docker.
+Les volumes `./chroma_db`, `./data` et `./backups` sont montés depuis le projet :
+les données sont donc partagées entre le lancement local (`uvicorn`) et Docker.
 
 Déploiement en production (HTTPS, comptes des testeurs) : voir `docs/DEPLOIEMENT.md`.
+
+## Sauvegardes
+
+Une archive horodatée des données du projet, avec empreintes SHA-256 et
+restauration vérifiée :
+
+```bash
+python scripts/backup.py                      # crée une archive dans backups/
+python scripts/backup.py --no-vectors         # sans l'index (régénérable)
+python scripts/backup.py --list               # liste les archives
+python scripts/backup.py --restore <archive> --dry-run   # vérifie sans écrire
+python scripts/backup.py --restore <archive>  # restaure
+```
+
+Sauvegardé : comptes (`data/app.db`), PDF sources, `.env` (clé JWT) et base
+vectorielle. Les connexions SQLite vivantes sont copiées via l'**API de
+sauvegarde de SQLite** (instantané cohérent) et non par simple copie de
+fichier — voir `docs/DEPLOIEMENT.md` pour la stratégie complète (règle 3-2-1,
+volume `caddy_data`, automatisation par cron).
+
+> 🏆 **Une sauvegarde jamais restaurée n'existe pas.**
 
 ## Tests et qualité du code
 
 ```bash
 pip install -r requirements-dev.txt   # dépendances de développement (une fois)
 
-pytest                                # suite de tests (~58 tests)
+pytest                                # suite de tests (~105 tests)
 pytest --cov=app --cov=scripts        # avec la couverture de code
 ruff check .                          # analyse statique
 ```

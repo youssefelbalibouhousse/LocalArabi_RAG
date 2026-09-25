@@ -122,9 +122,88 @@ curl -I https://chatbot.mondomaine.com  # doit répondre 200 en HTTPS
 
 ### ⚠️ À sauvegarder
 
-- Le volume **`caddy_data`** (contient les certificats TLS — les perdre force
-  une réémission, ce qui est limité en fréquence par Let's Encrypt).
-- Le dossier **`data/`** (comptes utilisateurs) et **`chroma_db/`** (base vectorielle).
+Toutes les données ne se valent pas : ce qui compte, c'est de savoir si elles
+sont **régénérables**.
+
+| Donnée | Régénérable ? | Priorité |
+|---|---|---|
+| `data/app.db` (comptes) | ❌ non — hachages bcrypt irréversibles | 🔴 critique |
+| `data/documents/` (PDF sources) | ❌ non — sans eux, plus rien à indexer | 🔴 critique |
+| `.env` (`SECRET_KEY`) | ❌ non — la perdre invalide tous les jetons | 🟠 importante |
+| `chroma_db/` (base vectorielle) | ✅ oui — **dérivée** des PDF | 🟡 confort |
+| volume `caddy_data` (certificats TLS) | ✅ oui — Let's Encrypt (quota limité) | 🟢 faible |
+
+> 💡 **Dérivée ≠ inutile** : sauvegarder `chroma_db/` évite une réindexation de
+> plusieurs minutes. Mais si vous devez choisir, gardez les PDF.
+
+#### Sauvegarder
+
+```bash
+# Archive complète (comptes + PDF + index + .env)
+docker compose exec api python scripts/backup.py
+
+# Archive légère : sans la base vectorielle (régénérable)
+docker compose exec api python scripts/backup.py --no-vectors
+
+# Lister les archives
+docker compose exec api python scripts/backup.py --list
+```
+
+Les archives sont écrites dans `./backups/` **sur l'hôte** (volume monté) :
+elles survivent donc à un `docker compose down`, et même à un `down -v`.
+
+Chaque archive contient un `MANIFEST.json` : date, liste des fichiers, tailles
+et empreintes **SHA-256**. C'est ce qui permet de prouver, des mois plus tard,
+que l'archive est intacte.
+
+#### Vérifier et restaurer
+
+```bash
+# Vérifier l'intégrité SANS rien écrire (à faire périodiquement !)
+docker compose exec api python scripts/backup.py --restore <archive> --dry-run
+
+# Restaurer réellement (arrêter l'API d'abord)
+docker compose stop api
+docker compose exec api python scripts/backup.py --restore <archive>
+docker compose start api
+```
+
+La restauration **refuse de commencer** si une seule vérification échoue
+(chemins dangereux, empreinte invalide, fichier manquant) : une restauration
+partielle serait pire que pas de restauration du tout.
+
+#### Les certificats TLS (volume Docker)
+
+Le script ne peut pas les lire : il s'exécute *dans* le conteneur `api`, qui
+n'a pas accès au volume d'un autre conteneur. On passe donc par un conteneur
+jetable :
+
+```bash
+docker run --rm -v fastapiproject_caddy_data:/data -v "$PWD/backups":/backup \
+  alpine tar czf /backup/caddy_data.tar.gz -C /data .
+```
+
+#### Rétention et automatisation
+
+`BACKUP_RETENTION` (défaut : `7`) fixe le nombre d'archives conservées ; les
+plus anciennes sont supprimées automatiquement après chaque sauvegarde.
+
+Pour automatiser tous les jours à 3 h du matin sur un serveur Linux :
+
+```bash
+# crontab -e
+0 3 * * * cd /srv/app && docker compose exec -T api python scripts/backup.py >> backups/cron.log 2>&1
+```
+
+> 🏆 **La règle d'or : une sauvegarde jamais restaurée n'existe pas.**
+> Testez une restauration sur un dossier vide au moins une fois avant
+> d'ouvrir l'application à des testeurs.
+
+#### La règle 3-2-1
+
+Trois copies, sur deux supports différents, dont **une hors site**. Un disque
+externe, un NAS distant ou un stockage objet (`rclone`, `scp`, Backblaze B2…)
+couvrent le dernier « 1 » — le seul qui sauve lors d'un vrai sinistre.
 
 ## Première installation des modèles (une seule fois)
 
