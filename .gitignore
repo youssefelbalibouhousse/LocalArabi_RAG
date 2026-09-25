@@ -22,6 +22,10 @@ htmlcov/
 # Variables d'environnement
 .env
 
+# Sauvegardes locales — elles contiennent les VRAIES données (comptes, PDF) :
+# les pousser sur GitHub reviendrait à publier votre base en clair.
+backups/
+
 # Notes personnelles — ne doivent JAMAIS être poussées sur GitHub
 NOTES-PERSO.md
 

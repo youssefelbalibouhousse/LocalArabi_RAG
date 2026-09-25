@@ -2,7 +2,7 @@
 #
 # Trois garde-fous indépendants :
 #   1. lint   : le code respecte les règles de qualité (ruff)
-#   2. tests  : les 58 tests passent
+#   2. tests  : les 105 tests passent
 #   3. docker : l'image de production se construit toujours
 #
 # Si un seul échoue, la Pull Request ne peut pas être fusionnée.

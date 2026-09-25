@@ -64,12 +64,17 @@ services:
       - LOGIN_RATE_LIMIT=${LOGIN_RATE_LIMIT:-}
       - REGISTER_RATE_LIMIT=${REGISTER_RATE_LIMIT:-}
       - ASK_RATE_LIMIT=${ASK_RATE_LIMIT:-}
+      # Nombre d'archives de sauvegarde conservées (voir scripts/backup.py).
+      - BACKUP_RETENTION=${BACKUP_RETENTION:-7}
       - CORS_ALLOW_ORIGINS=*
     volumes:
       # On monte les dossiers locaux pour que la base vectorielle et les
       # comptes/PDF soient persistants.
       - ./chroma_db:/app/chroma_db
       - ./data:/app/data
+      # Les sauvegardes sont écrites sur l'hôte : elles survivent donc à un
+      # « docker compose down » (et même à un « down -v »).
+      - ./backups:/app/backups
     ports:
       - "8000:8000"
     depends_on:

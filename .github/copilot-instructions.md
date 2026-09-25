@@ -26,6 +26,7 @@ pip install -r requirements-dev.txt    # deps + outils de test
 uvicorn app.main:app --reload          # lancer en local
 venv\Scripts\python.exe -m pytest      # suite de tests (doit rester verte)
 docker compose up -d --build           # lancer en conteneurs
+python scripts/backup.py               # sauvegarder les données
 ```
 
 Reconstruire la base vectorielle : `python scripts/build_kb.py`
@@ -55,6 +56,11 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   (`📄 Sources` / `📄 المصادر`) signifie que la base vectorielle est **vide**, pas
   que le modèle a échoué. Avec la mention des sources, c'est le modèle qui juge
   les extraits insuffisants.
-- **Secrets** : ne jamais committer `.env`, `chroma_db/`, `data/`. La clé
+- **Secrets** : ne jamais committer `.env`, `chroma_db/`, `data/`, `backups/`. La clé
   `SECRET_KEY` doit faire **au moins 32 octets** (RFC 7518) ; ne jamais exposer
   `hashed_password` dans une réponse d'API.
+- **Sauvegardes** : `scripts/backup.py` copie `data/app.db` via l'**API de sauvegarde
+  de SQLite** (`Connection.backup()`), jamais par copie de fichier : une copie brute
+  d'une base vivante peut être incohérente (« torn copy »). Toute restauration passe
+  par une extraction en dossier temporaire, une vérification SHA-256, puis
+  seulement l'écriture — ne pas court-circuiter cet ordre.

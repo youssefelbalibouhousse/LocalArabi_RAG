@@ -156,3 +156,38 @@ REGISTER_RATE_LIMIT = _parse_rate_limit("REGISTER_RATE_LIMIT", (5, 3600))
 # Question au chatbot : 20 par minute. Chaque appel coûte du temps GPU (ou de
 # l'argent en API cloud) : cette limite protège votre budget.
 ASK_RATE_LIMIT = _parse_rate_limit("ASK_RATE_LIMIT", (20, 60))
+
+
+# --- Sauvegardes ----------------------------------------------------------
+# Dossier de destination des archives (ignoré par Git : voir .gitignore).
+BACKUP_DIR = Path(os.getenv("BACKUP_DIR", BASE_DIR / "backups"))
+
+# Nombre d'archives conservées : au-delà, les plus anciennes sont supprimées.
+#
+# Garder PLUSIEURS versions est indispensable : une corruption découverte
+# aujourd'hui est déjà présente dans la sauvegarde d'aujourd'hui. Il faut
+# pouvoir remonter à un état antérieur au problème.
+BACKUP_RETENTION = int(os.getenv("BACKUP_RETENTION", "7"))
+
+if BACKUP_RETENTION < 1:
+    raise ValueError(
+        f"BACKUP_RETENTION={BACKUP_RETENTION} est invalide : la valeur doit être >= 1 "
+        "(sinon toutes les sauvegardes seraient supprimées)."
+    )
+
+
+def sqlite_database_path() -> Path | None:
+    """Chemin du fichier SQLite décrit par `DATABASE_URL`, ou None si autre moteur.
+
+    Permet au script de sauvegarde de localiser la base à copier SANS coder
+    « data/app.db » en dur : si `DATABASE_URL` change demain, la sauvegarde suit.
+
+    Renvoie None pour les URL non-SQLite (PostgreSQL, MySQL...) et pour les bases
+    en mémoire (`sqlite://`), qui n'ont par définition aucun fichier à copier.
+    """
+    prefix = "sqlite:///"
+    if not DATABASE_URL.startswith(prefix):
+        return None
+
+    chemin = DATABASE_URL[len(prefix):]
+    return Path(chemin) if chemin else None
