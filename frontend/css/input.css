@@ -1,0 +1,661 @@
+/* =========================================================================
+   Feuille de styles — compilée par Tailwind vers frontend/app.css
+   =========================================================================
+   Compiler : npm run build:css   (ou npm run watch:css en développement)
+
+   Organisation :
+     1. @source / @theme  -> les JETONS de design (couleurs, polices, courbes)
+     2. @layer base       -> fondations, typographie arabe, accessibilité
+     3. @layer components -> les composants nommés (.btn, .bubble, .citation)
+
+   Règle d'architecture : le HTML porte des classes SÉMANTIQUES (.bubble--user),
+   jamais des suites de classes utilitaires. Deux raisons — le JS redevient
+   lisible, et le design se modifie à UN seul endroit.
+   ========================================================================= */
+
+/* `source(none)` désactive la détection AUTOMATIQUE de Tailwind.
+   Sans lui, Tailwind scanne tout le dossier du projet et ramasse des chaînes
+   qui ressemblent à des classes dans la documentation, les tests, les notes…
+   Le résultat différait alors du build Docker (qui ne voit que frontend/), et
+   une classe pouvait fonctionner en local puis manquer en production.
+
+   Avec une liste de sources EXPLICITE, les deux builds produisent exactement
+   le même fichier. */
+@import "tailwindcss" source(none);
+
+/* Sources explicites : le balisage et la logique — les seuls fichiers où des
+   noms de classes apparaissent réellement. */
+@source "../index.html";
+@source "../app.js";
+
+@theme {
+  /* --- Palette : parchemin, encre, vert profond, laiton ---------------- */
+  --color-paper: #f6f1e6;      /* fond général, chaud — jamais un blanc pur */
+  --color-surface: #fffcf5;    /* cartes et bulles de l'assistant */
+  --color-surface-2: #efe8d8;  /* surfaces en retrait (champ de saisie) */
+  --color-ink: #17211c;        /* encre : « noir » légèrement vert */
+  --color-ink-soft: #5e655d;   /* texte secondaire */
+  --color-ink-faint: #8c9189;  /* métadonnées discrètes */
+  --color-line: #e0d7c3;       /* filets de séparation, 1 px */
+
+  --color-green: #0e3b2e;      /* aplat principal — vert profond */
+  --color-green-deep: #0a2c22; /* état appuyé */
+  --color-green-soft: #1b5744; /* état survolé */
+  --color-cream: #f6f1e6;      /* texte sur vert */
+
+  --color-brass: #b08430;      /* laiton : filets et ornements */
+  --color-brass-soft: #d9bc7a; /* laiton clair, sur fond vert */
+  --color-brass-deep: #8a6522; /* laiton assez sombre pour du TEXTE lisible */
+
+  --color-danger: #9b2c2c;
+
+  /* --- Typographie ---------------------------------------------------- */
+  /* Deux voix distinctes : la parole de l'outil, et la parole CITÉE. */
+  --font-ui: "IBM Plex Sans Arabic", "Segoe UI", system-ui, sans-serif;
+  --font-naskh: "Noto Naskh Arabic", "Traditional Arabic", "Times New Roman", serif;
+
+  /* Pour les références : on veut une CHASSE FIXE sur les chiffres et les noms
+     de fichiers latins (ils s'alignent alors verticalement), mais surtout PAS
+     de monospace pour l'arabe : aucune monospace n'a de glyphes arabes, et le
+     navigateur tomberait sur un repli arbitraire.
+
+     Le repli de police CSS se fait PAR GLYPHE : chaque caractère descend la
+     liste jusqu'au premier police qui le contient. « a.pdf » prend donc la
+     monospace, « صفحة » descend jusqu'à IBM Plex Sans Arabic. Les deux
+     cohabitent dans une même ligne. */
+  --font-ref: "Cascadia Mono", "SF Mono", Consolas, "IBM Plex Sans Arabic", sans-serif;
+
+  /* --- Mouvement ------------------------------------------------------ */
+  /* Courbes fortes : les easings CSS natifs manquent d'intention. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+@layer base {
+  /* Le bug du 100vh : sur mobile, la barre d'URL recouvre le bas de l'écran —
+     exactement là où se trouve le champ de saisie. 100dvh suit la hauteur
+     RÉELLE visible. La ligne 100vh sert de repli aux navigateurs anciens. */
+  html {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  body {
+    height: 100%;
+    margin: 0;
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-ui);
+    font-size: 1rem;
+    line-height: 1.6;
+    -webkit-tap-highlight-color: transparent; /* pas de flash bleu au toucher */
+    overflow: hidden;                          /* le scroll vit dans la conversation */
+  }
+
+  /* Le français et l'arabe n'ont PAS les mêmes besoins verticaux : la graphie
+     arabe est plus dense et porte des diacritiques (التشكيل) que rognerait une
+     hauteur de ligne trop serrée. 1.85 est le minimum confortable. */
+  [dir="rtl"] body,
+  [dir="rtl"] .prose {
+    line-height: 1.85;
+  }
+
+  /* INTERDIT ABSOLU : jamais de letter-spacing sur de l'arabe.
+     L'espacement casse la LIAISON des lettres (الحروف المتصلة) et transforme
+     « محمد » en « م ح م د ». Une seule ligne de CSS peut détruire la lecture. */
+  [dir="rtl"] * {
+    letter-spacing: normal;
+  }
+
+  /* Le laiton en aplat donne un aspect « carte de vœux » : il est réservé aux
+     filets d'un pixel et aux petits ornements. */
+
+  ::selection {
+    background: var(--color-brass-soft);
+    color: var(--color-ink);
+  }
+
+  /* Barre de défilement discrète, accordée au papier. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+
+  /* Anneau de focus visible — indispensable à la navigation clavier.
+     :focus-visible et non :focus, pour ne pas l'afficher au clic souris. */
+  :focus-visible {
+    outline: 2px solid var(--color-brass);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Les animations doivent RESTER accessibles : on garde les fondus (qui aident
+     à comprendre) et on supprime les déplacements (qui rendent malades). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* ===== Structure ==================================================== */
+
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-width: 48rem;
+    margin: 0 auto;
+    background: var(--color-paper);
+  }
+
+  /* ===== En-tête ====================================================== */
+
+  .masthead {
+    position: relative;
+    flex-shrink: 0;
+    background: var(--color-green);
+    color: var(--color-cream);
+    padding: 0.875rem 1rem 1.125rem;
+  }
+
+  .masthead__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .masthead__title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 0;
+  }
+
+  .masthead__subtitle {
+    margin: 0.25rem 0 0;
+    /* Surtout PAS de chasse fixe ici : ce texte est en arabe. */
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-brass-soft);
+    text-wrap: pretty;
+  }
+
+  .masthead__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  /* Le séparateur « utilisateur + déconnexion ». `hidden` (couche utilities)
+     l'emporte sur ce display:flex, ce qui permet au JS de le masquer par une
+     simple bascule de classe. */
+  .user-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .user-chip__name {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-brass-soft);
+    max-width: 12ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 2rem;
+    block-size: 2rem;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    transition:
+      transform 140ms var(--ease-out),
+      background-color 140ms var(--ease-out);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .icon-btn:hover {
+      background: color-mix(in srgb, currentColor 15%, transparent);
+    }
+  }
+
+  .icon-btn:active {
+    transform: scale(0.94);
+  }
+
+  /* Le SEUL ornement de toute l'interface : un bandeau géométrique à huit
+     branches (girih). Géométrique et non floral — c'est ce qui le garde
+     austère au lieu de décoratif. */
+  .ornament {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 10px;
+    width: 100%;
+    display: block;
+    color: var(--color-brass);
+    opacity: 0.75;
+  }
+
+  /* ===== Boutons ====================================================== */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.6875rem 1.125rem;
+    border: 1px solid transparent;
+    border-radius: 0.625rem;
+    font-family: inherit;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    cursor: pointer;
+    /* On n'anime QUE les propriétés nécessaires. « transition: all » anime
+       aussi des propriétés qui recalculent la mise en page. */
+    transition:
+      transform 140ms var(--ease-out),
+      background-color 140ms var(--ease-out),
+      border-color 140ms var(--ease-out);
+  }
+
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: progress;
+  }
+
+  .btn--primary {
+    background: var(--color-green);
+    color: var(--color-cream);
+  }
+
+  .btn--outline {
+    background: transparent;
+    border-color: var(--color-line);
+    color: var(--color-ink);
+  }
+
+  .btn--quiet {
+    background: transparent;
+    color: inherit;
+    border-color: color-mix(in srgb, currentColor 35%, transparent);
+    font-weight: 500;
+  }
+
+  .btn--block {
+    width: 100%;
+  }
+
+  /* Retour au toucher : sans cet état, l'interface ne confirme pas qu'elle a
+     reçu le geste. 0.97 suffit — en dessous, ça devient un jouet. */
+  @media (hover: hover) and (pointer: fine) {
+    .btn--primary:hover {
+      background: var(--color-green-soft);
+    }
+    .btn--outline:hover {
+      background: var(--color-surface-2);
+    }
+    .btn--quiet:hover {
+      background: color-mix(in srgb, currentColor 12%, transparent);
+    }
+  }
+
+  .btn:active {
+    transform: scale(0.97);
+  }
+
+  /* ===== Cartes et champs ============================================= */
+
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 0.875rem;
+    padding: 1.5rem;
+    box-shadow: 0 1px 2px rgb(23 33 28 / 0.04);
+  }
+
+  .card__title {
+    margin: 0 0 1.25rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    /* « pretty » et non « balance » : équilibrage de lignes capricieux en arabe. */
+    text-wrap: pretty;
+  }
+
+  .field {
+    display: block;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line);
+    border-radius: 0.625rem;
+    font-family: inherit;
+    font-size: 1rem;
+    color: var(--color-ink);
+    /* PAS de text-align: right en dur, PAS de dir en dur : padding-inline et
+       text-align: start suivent la direction du document, quelle qu'elle soit.
+       C'est ce qui rend les quinze lignes de JS jusque-là nécessaires inutiles. */
+    padding-inline: 1rem;
+    text-align: start;
+    transition: border-color 140ms var(--ease-out), background-color 140ms var(--ease-out);
+  }
+
+  .field::placeholder {
+    color: var(--color-ink-faint);
+  }
+
+  .field:focus {
+    background: var(--color-surface);
+    border-color: var(--color-brass);
+    outline: none;
+  }
+
+  .field:focus-visible {
+    outline: 2px solid var(--color-brass);
+    outline-offset: 2px;
+  }
+
+  .error {
+    margin: 0;
+    color: var(--color-danger);
+    font-size: 0.875rem;
+    text-align: start;
+  }
+
+  /* ===== Conversation ================================================= */
+
+  .thread {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    /* Empêche le scroll de la conversation de se propager à la page : sans
+       cela, en fin de fil, le geste déclenche le « tirer pour rafraîchir ». */
+    overscroll-behavior: contain;
+    padding: 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .turn {
+    display: flex;
+  }
+
+  .bubble {
+    max-width: 42ch;
+    padding: 0.75rem 1rem;
+    border-radius: 0.875rem;
+    font-size: 0.9375rem;
+    text-wrap: pretty;
+    /* Les bulles arrivent : un départ à 95 % évite l'effet « sorti de nulle
+       part » d'un scale(0), qui n'existe pas dans le monde réel. */
+    animation: bubble-in 180ms var(--ease-out) both;
+  }
+
+  .bubble--user {
+    background: var(--color-green);
+    color: var(--color-cream);
+    /* Le coin « queue » est du côté VERS LEQUEL la bulle est poussée :
+       block-end + inline-END. Se tromper de côté est le genre de détail qui
+       ne se voit pas consciemment, mais qui rend l'ensemble bancal. */
+    border-end-end-radius: 0.25rem;
+    /* Pousse la bulle du côté FIN de la ligne : à droite en français, à
+       gauche en arabe. La mise en page se retourne toute seule. */
+    margin-inline-start: auto;
+  }
+
+  .bubble--assistant {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-end-start-radius: 0.25rem;
+    margin-inline-end: auto;
+    width: 100%;
+    max-width: 46rem;
+  }
+
+  /* L'accueil n'est PAS une réponse : il ne doit pas ressembler à une carte de
+     réponse pleine largeur, mais à une note d'introduction discrète. */
+  .bubble--note {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line);
+    color: var(--color-ink-soft);
+    font-size: 0.875rem;
+    max-width: 32rem;
+    margin-inline-end: auto;
+  }
+
+  @keyframes bubble-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .bubble__text {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    /* Au-delà de ~75 caractères par ligne, l'œil perd le début de la ligne
+       suivante en revenant à la marge. La carte garde sa largeur — c'est le
+       BLOC DE CITATION qui en profite, pas la prose. */
+    max-width: 68ch;
+  }
+
+  /* ===== Bloc de citation ============================================= */
+  /* Le cœur du sujet : dans les sciences religieuses, la SOURCE est la valeur.
+     Elle est donc traitée comme une note d'édition savante, pas comme un
+     pavé gris relégué en fin de réponse. */
+
+  .citation {
+    margin-block-start: 1rem;
+    padding-block-start: 0.875rem;
+    border-top: 1px solid var(--color-brass);
+  }
+
+  .citation__label {
+    display: flex;
+    align-items: center;
+    gap: 0.4375rem;
+    margin: 0 0 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-brass-deep);
+    /* On peut espacer de l'ARABE ? Non. Mais on peut espacer une étiquette en
+       capitales latines : ce libellé est bilingue, on s'abstient donc. */
+  }
+
+  .citation__label--sub {
+    margin-block-start: 1rem;
+    color: var(--color-ink-faint);
+    font-weight: 500;
+  }
+
+  .citation__mark {
+    inline-size: 10px;
+    block-size: 10px;
+    flex-shrink: 0;
+    color: var(--color-brass);
+  }
+
+  .citation__refs {
+    margin: 0;
+    font-family: var(--font-ref);
+    font-size: 0.8125rem;
+    color: var(--color-ink-soft);
+    text-wrap: pretty;
+  }
+
+  .citation__list {
+    margin: 0.75rem 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .citation__item {
+    /* La PAROLE CITÉE a sa propre voix : la Naskh, celle du manuscrit.
+       C'est exactement la logique d'une édition critique (تحقيق). */
+    font-family: var(--font-naskh);
+    font-size: 1.0625rem;
+    line-height: 1.9;
+    color: var(--color-ink);
+    padding-inline-start: 0.875rem;
+    border-inline-start: 2px solid var(--color-brass-soft);
+    text-wrap: pretty;
+  }
+
+  .citation__source {
+    display: block;
+    margin-block-start: 0.375rem;
+    font-family: var(--font-ref);
+    font-size: 0.75rem;
+    font-style: normal;
+    color: var(--color-ink-faint);
+  }
+
+  /* ===== Attente ====================================================== */
+
+  .waiting {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    color: var(--color-ink-soft);
+    font-size: 0.875rem;
+  }
+
+  /* Un indicateur vif : à durée de chargement identique, il est PERÇU comme
+     plus rapide. Le mouvement est continu (linear), donc jamais saccadé. */
+  .spinner {
+    inline-size: 15px;
+    block-size: 15px;
+    flex-shrink: 0;
+    border: 1.5px solid var(--color-line);
+    border-top-color: var(--color-brass);
+    border-radius: 50%;
+    animation: spin 700ms linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* ===== Zone de saisie =============================================== */
+
+  .composer {
+    flex-shrink: 0;
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-line);
+    padding: 0.875rem 1rem;
+    /* Respecte l'encoche et la barre gestuelle des téléphones récents. */
+    padding-block-end: max(0.875rem, env(safe-area-inset-bottom));
+  }
+
+  .composer__row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .composer__field {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ===== Vues plein écran (langue, connexion) ========================= */
+
+  .stage {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem 1rem;
+  }
+
+  .stage__panel {
+    width: 100%;
+    max-width: 22rem;
+  }
+
+  .lang-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+
+  .lang-btn {
+    padding: 1rem 0.5rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--color-line);
+    background: var(--color-surface-2);
+    color: var(--color-ink);
+    font-family: inherit;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      transform 140ms var(--ease-out),
+      background-color 140ms var(--ease-out),
+      border-color 140ms var(--ease-out);
+  }
+
+  .lang-btn--active {
+    background: var(--color-green);
+    border-color: var(--color-green);
+    color: var(--color-cream);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .lang-btn:hover {
+      border-color: var(--color-brass);
+    }
+  }
+
+  .lang-btn:active {
+    transform: scale(0.97);
+  }
+
+  /* ===== Espacement utilitaire minimal ================================ */
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
