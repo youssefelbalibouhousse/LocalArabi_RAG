@@ -114,3 +114,5 @@ les tests ou l'analyse statique échouent.
 | Fournisseur LLM | `LLM_PROVIDER=ollama` (auto-hébergé) ou `openai` (Groq, Together, vLLM…) |
 | Inscription | Ouverte en développement, **fermée par défaut en production** |
 | Clé JWT | Minimum 32 octets (RFC 7518) ; l'application refuse de démarrer en production avec la clé de développement |
+
+<!-- test de protection -->
