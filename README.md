@@ -105,6 +105,17 @@ python scripts/backup.py --restore <archive> --dry-run   # vérifie sans écrire
 python scripts/backup.py --restore <archive>  # restaure
 ```
 
+Automatiser (tâche quotidienne, **idempotente**) :
+
+```bash
+python scripts/schedule_backup.py              # montre le plan, ne modifie rien
+python scripts/schedule_backup.py --install    # installe la tâche quotidienne
+python scripts/schedule_backup.py --status     # est-elle active ?
+```
+
+Chaque exécution automatique utilise `--verify --log` : l'archive est vérifiée
+dès sa création, et le déroulement est écrit dans `backups/backup.log`.
+
 Sauvegardé : comptes (`data/app.db`), PDF sources, `.env` (clé JWT) et base
 vectorielle. Les connexions SQLite vivantes sont copiées via l'**API de
 sauvegarde de SQLite** (instantané cohérent) et non par simple copie de
@@ -118,7 +129,7 @@ volume `caddy_data`, automatisation par cron).
 ```bash
 pip install -r requirements-dev.txt   # dépendances de développement (une fois)
 
-pytest                                # suite de tests (~105 tests)
+pytest                                # la suite de tests complète
 pytest --cov=app --cov=scripts        # avec la couverture de code
 ruff check .                          # analyse statique
 ```

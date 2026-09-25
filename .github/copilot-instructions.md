@@ -27,6 +27,7 @@ uvicorn app.main:app --reload          # lancer en local
 venv\Scripts\python.exe -m pytest      # suite de tests (doit rester verte)
 docker compose up -d --build           # lancer en conteneurs
 python scripts/backup.py               # sauvegarder les données
+python scripts/schedule_backup.py --status   # la sauvegarde auto est-elle planifiée ?
 ```
 
 Reconstruire la base vectorielle : `python scripts/build_kb.py`
@@ -64,3 +65,9 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   d'une base vivante peut être incohérente (« torn copy »). Toute restauration passe
   par une extraction en dossier temporaire, une vérification SHA-256, puis
   seulement l'écriture — ne pas court-circuiter cet ordre.
+- **Planification des sauvegardes** : `scripts/schedule_backup.py` est **idempotent**
+  (ligne repérée par un marqueur dans le crontab, option `/F` sous Windows). Ne jamais
+  inscrire une seconde tâche non marquée : deux sauvegardes concurrentes liraient la
+  même base SQLite en parallèle. La tâche planifiée utilise toujours `--verify --log`.
+  Dans `backup.py`, ne pas retirer `--log` d'un contexte planifié : le planificateur ne
+  conserve pas la sortie standard, donc un échec deviendrait invisible.
