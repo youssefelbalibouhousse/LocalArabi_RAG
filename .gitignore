@@ -29,6 +29,15 @@ backups/
 # Notes personnelles — ne doivent JAMAIS être poussées sur GitHub
 NOTES-PERSO.md
 
+# --- Frontend ---
+# Dépendances Node : servent UNIQUEMENT à compiler la feuille de styles.
+node_modules/
+
+# Feuille de styles COMPILÉE : c'est un artefact de build, pas une source.
+# On versionne frontend/css/input.css et on le compile (npm run build:css),
+# exactement comme on ne versionne pas un .pyc.
+frontend/app.css
+
 # IDE
 .idea/
 .vscode/

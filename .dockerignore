@@ -27,3 +27,12 @@ __pycache__/
 
 # Fichiers de test locaux
 test_main.http
+
+# --- Frontend ---
+# Dépendances Node : inutiles dans le contexte, l'étape « styles » les
+# réinstalle avec `npm ci` depuis package-lock.json.
+node_modules/
+
+# Feuille compilée depuis le poste de développement : l'image la reconstruit
+# elle-même, pour ne jamais servir un artefact périmé.
+frontend/app.css
