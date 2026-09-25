@@ -188,11 +188,44 @@ docker run --rm -v fastapiproject_caddy_data:/data -v "$PWD/backups":/backup \
 `BACKUP_RETENTION` (défaut : `7`) fixe le nombre d'archives conservées ; les
 plus anciennes sont supprimées automatiquement après chaque sauvegarde.
 
-Pour automatiser tous les jours à 3 h du matin sur un serveur Linux :
+Pour automatiser la sauvegarde, une seule commande suffit — et elle est
+**idempotente** : la relancer remplace la tâche au lieu d'en créer une seconde.
 
 ```bash
-# crontab -e
-0 3 * * * cd /srv/app && docker compose exec -T api python scripts/backup.py >> backups/cron.log 2>&1
+# SUR LE SERVEUR : l'application tourne dans Docker, donc --mode docker
+python3 scripts/schedule_backup.py --mode docker           # plan, ne modifie RIEN
+python3 scripts/schedule_backup.py --mode docker --install
+python3 scripts/schedule_backup.py --status                # est-ce actif ?
+
+# Sur un poste de développement (venv local)
+python scripts/schedule_backup.py --install
+```
+
+Le planificateur utilisé dépend du système :
+
+| Système | Outil | Idempotence |
+|---|---|---|
+| Linux / macOS | `crontab` | ligne repérée par un **marqueur** (`# arabic-rag-backup`) |
+| Windows | Planificateur de tâches | option `/F` (écrase l'existante) |
+
+Chaque exécution lance `scripts/backup.py --verify --log` :
+
+- **`--verify`** : l'archive est vérifiée (empreintes SHA-256) aussitôt créée ;
+- **`--log`** : le déroulement et le **code de sortie** sont écrits dans
+  `backups/backup.log`. Le planificateur ne conserve pas la sortie standard :
+  sans journal, une sauvegarde qui échoue échoue **en silence**.
+
+> 🔒 **Pourquoi l'idempotence est vitale** : deux tâches concurrentes
+> sauvegarderaient en parallèle, donc liraient la même base SQLite au même
+> moment. Le marqueur (cron) et l'option `/F` (Windows) l'empêchent.
+
+**Vérifier que la sauvegarde tourne réellement** — une tâche *planifiée* n'est
+pas une tâche *exécutée* :
+
+```bash
+python scripts/schedule_backup.py --status
+tail -n 20 backups/backup.log
+python scripts/backup.py --list        # une archive par jour est attendue
 ```
 
 > 🏆 **La règle d'or : une sauvegarde jamais restaurée n'existe pas.**
