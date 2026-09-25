@@ -22,6 +22,9 @@ htmlcov/
 # Variables d'environnement
 .env
 
+# Notes personnelles — ne doivent JAMAIS être poussées sur GitHub
+NOTES-PERSO.md
+
 # IDE
 .idea/
 .vscode/
