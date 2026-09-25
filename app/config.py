@@ -25,6 +25,31 @@ def _env_flag(name: str, default: bool) -> bool:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
+
+def _parse_rate_limit(name: str, default: tuple[int, int]) -> tuple[int, int]:
+    """Analyse un réglage « N/FENÊTRE » : ex. « 5/60 » = 5 requêtes par 60 secondes.
+
+    Une valeur illisible fait échouer le démarrage. C'est volontaire : mieux vaut
+    une erreur explicite qu'une protection silencieusement différente de celle
+    que l'exploitant croit avoir configurée.
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+
+    try:
+        maximum, fenetre = (int(part) for part in raw.split("/", 1))
+    except ValueError:
+        raise ValueError(
+            f"{name}={raw!r} est invalide. Format attendu : « 5/60 » "
+            "(5 requêtes par 60 secondes)."
+        ) from None
+
+    if maximum < 1 or fenetre < 1:
+        raise ValueError(f"{name}={raw!r} : les deux valeurs doivent être >= 1.")
+
+    return maximum, fenetre
+
 # Emplacements
 DOCUMENTS_DIR = BASE_DIR / "data" / "documents"
 CHROMA_DB_PATH = str(BASE_DIR / "chroma_db")
@@ -115,3 +140,19 @@ ALLOW_REGISTRATION = _env_flag("ALLOW_REGISTRATION", ENVIRONMENT != "production"
 def using_default_secret_key() -> bool:
     """Indique si la clé JWT n'a pas été fournie (clé de développement)."""
     return SECRET_KEY == DEV_SECRET_KEY
+
+
+# --- Limitation de débit (rate limiting) ---------------------------------
+# Format « N/FENÊTRE » : N requêtes maximum par client sur FENÊTRE secondes.
+# Les limites sont comptées par client (adresse IP) ET par route.
+RATE_LIMIT_ENABLED = _env_flag("RATE_LIMIT_ENABLED", True)
+
+# Connexion : strict, contre les attaques par force brute. 5 essais par minute.
+LOGIN_RATE_LIMIT = _parse_rate_limit("LOGIN_RATE_LIMIT", (5, 60))
+
+# Inscription : très strict. 5 comptes par heure.
+REGISTER_RATE_LIMIT = _parse_rate_limit("REGISTER_RATE_LIMIT", (5, 3600))
+
+# Question au chatbot : 20 par minute. Chaque appel coûte du temps GPU (ou de
+# l'argent en API cloud) : cette limite protège votre budget.
+ASK_RATE_LIMIT = _parse_rate_limit("ASK_RATE_LIMIT", (20, 60))
