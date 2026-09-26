@@ -1,0 +1,32 @@
+# Jeu d'or — questions de référence pour mesurer la qualité de la récupération.
+#
+# Format : UNE ligne JSON par question. Les lignes vides et celles commençant
+# par « # » (comme celle-ci) sont ignorées : ce fichier se relit à la main.
+#
+# Champs :
+#   id        identifiant court et unique (facultatif, sinon q<numéro de ligne>)
+#   question  la question, telle qu'un utilisateur la poserait
+#   lang      "ar" ou "fr" (facultatif, défaut "ar")
+#   status    "draft" (défaut) tant que la question n'a pas été relue ;
+#             "validated" une fois la source attendue confirmée à la main
+#   expected  liste NON VIDE de passages attendus, chacun :
+#               source  nom du fichier (obligatoire)
+#               page    numéro de page (facultatif : n'importe quelle page
+#                       du fichier conviendra alors)
+#   notes     remarque libre (facultatif)
+#
+# ⚠️ Ne comparez que des mesures faites sur le MÊME corpus. Le rapport
+#    enregistre une empreinte du corpus et vous avertit si elles diffèrent.
+#
+# Pour commencer :
+#   python scripts/eval_rag.py --sample 10        # affiche 10 extraits au hasard
+#   # écrivez une question par extrait ci-dessous, puis :
+#   python scripts/eval_rag.py --run --label baseline
+#
+# Le fichier est prêt à recevoir vos questions. Un exemple est fourni
+# ci-dessous pour que « --run » fonctionne immédiatement : il a été lu dans un
+# extrait réel, mais il doit être RELU ET CONFIRMÉ par vous.
+
+# --- Exemple (à vérifier, puis à supprimer ou à garder) -------------------
+{"id": "q001", "question": "هل تجب الكفارة إذا بطل الاعتكاف؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 9}], "notes": "Exemple : extrait réel page 9, lignes 10-18 (« وحيث بطل الاعتكاف... ولا كفارة »). À confirmer avant de s'y fier."}
+

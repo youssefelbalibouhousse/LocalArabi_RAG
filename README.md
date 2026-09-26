@@ -12,6 +12,7 @@ Chaque réponse cite ses sources : fichier, page et intervalle de lignes.
 app/
 ├── config.py        # Configuration centralisée (chemins, modèles, URL)
 ├── rag.py           # Logique RAG : récupération + génération
+├── evaluation.py    # Mesure de la qualité de la récupération (hit@k, MRR)
 ├── language.py      # Détection arabe/français (respect de la langue)
 ├── auth.py          # JWT + hachage des mots de passe
 ├── ratelimit.py     # Limitation de débit (fenêtre glissante)
@@ -23,9 +24,13 @@ frontend/
 └── app.css          # Feuille COMPILÉE (non versionnée)
 scripts/
 ├── build_kb.py          # Ingestion des PDF → base vectorielle
+├── eval_rag.py          # Évaluation de la récupération (jeu d'or, mesures)
 ├── backup.py            # Sauvegarde + vérification + restauration
 ├── schedule_backup.py   # Sauvegarde quotidienne automatique
 └── create_user.py       # Création d'un compte en ligne de commande
+eval/
+├── golden.jsonl         # Jeu d'or : questions de référence (versionné)
+└── results/             # Rapports de mesure (non versionnés)
 tests/               # Suite pytest
 data/documents/      # Déposer ici les PDF à indexer
 chroma_db/           # Base vectorielle générée (non versionnée)
@@ -161,6 +166,59 @@ ruff check .                          # analyse statique
 Ces deux commandes tournent automatiquement à chaque `git push` (voir
 `.github/workflows/ci.yml`) : une Pull Request ne peut pas être fusionnée si
 les tests ou l'analyse statique échouent.
+
+## Évaluation de la qualité des réponses
+
+Mesurer si la réponse est *bonne* demande un juge. Mesurer si la
+**récupération** est bonne, non : il suffit de questions dont on connaît la
+source. C'est ce que fait ce harnais, et sans lui tout réglage (taille de
+chunk, chevauchement, modèle d'embedding, reranker, seuil de distance) se
+décide à l'intuition.
+
+```bash
+# 1. Afficher des extraits au hasard pour écrire des questions
+python scripts/eval_rag.py --sample 10
+
+# 2. Écrire les questions dans eval/golden.jsonl, puis mesurer
+python scripts/eval_rag.py --run --label baseline
+
+# 3. Comparer deux mesures (ex. avant / après ajout d'un reranker)
+python scripts/eval_rag.py --compare baseline avec-reranker
+```
+
+Deux métriques complémentaires :
+
+| Métrique | Question à laquelle elle répond |
+|---|---|
+| `hit@k` | A-t-on trouvé le bon passage dans les *k* premiers ? |
+| `MRR@k` | L'a-t-on bien **classé** ? (le rang 1 ne vaut pas le rang 5) |
+
+`hit@k` seule ne suffit pas : un bon extrait au rang 5 est compté comme celui du
+rang 1, alors qu'il est plus souvent ignoré par le modèle. Un **reranker**
+améliore rarement `hit@k` — il ne peut pas trouver ce que la recherche a raté —
+mais presque toujours le MRR.
+
+Chaque rapport enregistre le modèle d'embedding, la taille de chunk, la taille
+du corpus et une **empreinte du corpus**. La comparaison vous avertit si les deux
+mesures ne portent pas sur le même corpus : sans cet avertissement, on
+attribuerait au réglage testé l'effet d'un simple changement de documents.
+
+Le jeu d'or (`eval/golden.jsonl`) est **versionné** — c'est un actif de test, et
+il s'enrichit à chaque question que vos testeurs posent. Les rapports
+(`eval/results/`) ne le sont pas : ils contiennent des extraits du corpus et
+sont régénérables.
+
+Le jeu d'or **grandit avec le corpus** : quand vous ajoutez des documents, vous
+ajoutez des questions — mais vous ne supprimez pas les anciennes, qui restent
+valables tant que leurs documents restent indexés. Si un document est retiré, les
+questions qui le visent deviennent impossibles à satisfaire : elles sont alors
+**exclues du calcul** et signalées dans le rapport, au lieu d'être comptées
+« introuvables » — ce qui ferait chuter le score à cause d'un document retiré, et
+non de la qualité de la récupération.
+
+> 🎯 Une question **non retrouvée** est plus instructive qu'un score : regardez
+> si le bon passage est absent du top-*k* (problème de découpage ou de modèle)
+> ou seulement mal classé (problème que le reranker résout).
 
 ## Choix techniques
 
