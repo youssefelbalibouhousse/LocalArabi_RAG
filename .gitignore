@@ -38,6 +38,9 @@ node_modules/
 # exactement comme on ne versionne pas un .pyc.
 frontend/app.css
 
-# IDE
-.idea/
-.vscode/
+# --- Évaluation ---
+# Rapports de mesure : ils contiennent des EXTRAITS du corpus (donc le texte des
+# PDF) et sont régénérables par « python scripts/eval_rag.py --run ». Même
+# raisonnement que pour frontend/app.css : on versionne la source (le jeu d'or
+# eval/golden.jsonl), pas le résultat.
+eval/results/
