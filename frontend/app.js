@@ -39,6 +39,7 @@
       loading: 'أبحث في المستندات…',
       processingError: 'تعذّر معالجة السؤال.',
       connectionError: 'تعذّر الاتصال بالخادم.',
+      serverError: 'حدث خطأ في الخادم ولم يتمكن من معالجة الطلب.',
       sources: 'المصادر',
       excerpts: 'المقتطفات',
       welcome: (n) =>
@@ -62,6 +63,7 @@
       loading: 'Recherche dans les documents…',
       processingError: 'La question n’a pas pu être traitée.',
       connectionError: 'Impossible de joindre le serveur.',
+      serverError: 'Le serveur a rencontré une erreur et n’a pas pu traiter la demande.',
       sources: 'Sources',
       excerpts: 'Extraits cités',
       welcome: (n) =>
@@ -412,6 +414,24 @@
     return response;
   }
 
+  /**
+   * Lit le corps d'une réponse SANS supposer qu'il est en JSON.
+   *
+   * Une exception non gérée côté serveur renvoie « Internal Server Error » en
+   * TEXTE BRUT. Appeler `response.json()` dessus lève donc une erreur, qui est
+   * ensuite présentée à l'utilisateur comme une panne réseau — alors que le
+   * serveur a bel et bien répondu. Un diagnostic faux, et c'est exactement le
+   * genre d'erreur qui coûte des heures de recherche.
+   */
+  async function readBody(response) {
+    const brut = await response.text();
+    try {
+      return JSON.parse(brut);
+    } catch {
+      return { detail: brut.trim() };
+    }
+  }
+
   // --- Connexion / inscription -------------------------------------------
   async function login(username, password) {
     const response = await fetch(`${API_BASE}/login`, {
@@ -498,10 +518,21 @@
       const response = await apiFetch(
         `/ask?question=${encodeURIComponent(question)}&language=${currentLang}`,
       );
-      const data = await response.json();
+      const data = await readBody(response);
 
       waiting.remove();
-      appendAnswer(response.ok ? data.answer : data.detail || t('processingError'));
+
+      if (response.ok) {
+        appendAnswer(data.answer);
+      } else if (response.status >= 500) {
+        // Le serveur a RÉPONDU, mais en échec (modèle Ollama manquant, service
+        // injoignable...). L'annoncer comme une panne réseau enverrait
+        // l'utilisateur — et le développeur — sur une fausse piste.
+        appendMessage(t('serverError'), false);
+        console.error('Erreur serveur', response.status, ':', data.detail);
+      } else {
+        appendMessage(data.detail || t('processingError'), false);
+      }
     } catch (error) {
       waiting.remove();
       if (error.message !== 'unauthorized') appendMessage(t('connectionError'), false);
