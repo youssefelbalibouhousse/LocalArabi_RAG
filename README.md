@@ -208,6 +208,14 @@ il s'enrichit à chaque question que vos testeurs posent. Les rapports
 (`eval/results/`) ne le sont pas : ils contiennent des extraits du corpus et
 sont régénérables.
 
+Le jeu d'or **grandit avec le corpus** : quand vous ajoutez des documents, vous
+ajoutez des questions — mais vous ne supprimez pas les anciennes, qui restent
+valables tant que leurs documents restent indexés. Si un document est retiré, les
+questions qui le visent deviennent impossibles à satisfaire : elles sont alors
+**exclues du calcul** et signalées dans le rapport, au lieu d'être comptées
+« introuvables » — ce qui ferait chuter le score à cause d'un document retiré, et
+non de la qualité de la récupération.
+
 > 🎯 Une question **non retrouvée** est plus instructive qu'un score : regardez
 > si le bon passage est absent du top-*k* (problème de découpage ou de modèle)
 > ou seulement mal classé (problème que le reranker résout).

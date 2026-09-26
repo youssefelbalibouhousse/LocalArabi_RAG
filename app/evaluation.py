@@ -33,7 +33,7 @@ vectorielle ni modèle de langue.
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -248,6 +248,20 @@ def source_matches(retrieved: Mapping[str, Any], expected: ExpectedSource) -> bo
     return retrieved.get("page") == expected.page
 
 
+def est_orpheline(question: GoldenQuestion, sources_indexees: Collection[str]) -> bool:
+    """La question ne peut-elle plus être satisfaite, faute de source indexée ?
+
+    Elle l'est seulement si AUCUNE de ses sources attendues n'est indexée : une
+    question dont une source subsiste reste parfaitement mesurable.
+
+    Sert à EXCLURE du calcul les questions devenues impossibles. Les compter
+    « introuvables » ferait chuter le score à cause d'un document retiré du
+    corpus, et non de la qualité de la récupération — un faux signal, qui
+    masquerait un vrai problème le jour où il apparaîtrait pour de bon.
+    """
+    return all(source.source not in sources_indexees for source in question.expected)
+
+
 def first_match_rank(
     retrieved_sources: Iterable[Mapping[str, Any]],
     expected: Sequence[ExpectedSource],
@@ -274,25 +288,61 @@ def reciprocal_rank(rank: int | None, k: int) -> float:
     return 1.0 / rank
 
 
+class CorpusFingerprint:
+    """Accumulateur d'empreinte de corpus, en mémoire constante.
+
+    Pourquoi un accumulateur plutôt qu'un simple tri : une fois le corpus à
+    l'échelle de la bibliothèque Shamela (~23 millions de chunks), constituer la
+    liste complète des identifiants pour la trier demanderait plusieurs
+    gigaoctets. Ici, chaque identifiant est incorporé puis oublié.
+
+    L'empreinte est un OU-exclusif (XOR) des empreintes individuelles. XOR étant
+    commutatif et associatif, le résultat ne dépend PAS de l'ordre de parcours —
+    indispensable, car l'ordre de retour de la base vectorielle n'a aucune raison
+    d'être stable d'une exécution à l'autre.
+    """
+
+    __slots__ = ("_accumulateur", "_nombre")
+
+    def __init__(self) -> None:
+        self._accumulateur = 0
+        self._nombre = 0
+
+    def add(self, identifier: str) -> None:
+        """Incorpore un identifiant."""
+        self._accumulateur ^= int.from_bytes(
+            hashlib.sha256(identifier.encode("utf-8")).digest(), "big"
+        )
+        self._nombre += 1
+
+    def update(self, identifiers: Iterable[str]) -> None:
+        """Incorpore une série d'identifiants."""
+        for identifier in identifiers:
+            self.add(identifier)
+
+    def hexdigest(self) -> str:
+        """Empreinte finale : 12 caractères hexadécimaux.
+
+        Le NOMBRE d'identifiants est incorporé séparément : un XOR seul ne
+        distinguerait pas un corpus vide d'un corpus dont les identifiants
+        s'annulent deux à deux.
+        """
+        contenu = f"{self._nombre}:{self._accumulateur}"
+        return hashlib.sha256(contenu.encode("utf-8")).hexdigest()[:12]
+
+
 def corpus_fingerprint(identifiers: Iterable[str]) -> str:
     """Empreinte stable d'un corpus, pour vérifier que deux mesures sont comparables.
 
     Deux rapports ne se comparent que si le corpus est le MÊME. Sans cette
-    empreinte, on peut croire à un gain de qualité alors qu'on a simplement
-    changé les documents indexés.
+    empreinte, on peut croire à un gain de qualité alors qu'on a seulement changé
+    les documents indexés.
 
-    Les identifiants sont TRIÉS avant hachage : l'ordre de retour de la base
-    vectorielle n'a aucune raison d'être stable d'une exécution à l'autre et ne
-    doit donc pas faire varier l'empreinte.
-
-    Attention : cette fonction charge tous les identifiants en mémoire. Convenable
-    jusqu'à quelques centaines de milliers de chunks, à revoir au-delà.
+    Accepte un simple générateur : rien n'est conservé en mémoire.
     """
-    digest = hashlib.sha256()
-    for identifier in sorted(identifiers):
-        digest.update(identifier.encode("utf-8"))
-        digest.update(b"\n")
-    return digest.hexdigest()[:12]
+    empreinte = CorpusFingerprint()
+    empreinte.update(identifiers)
+    return empreinte.hexdigest()
 
 
 # --- Rapports -------------------------------------------------------------
@@ -327,6 +377,10 @@ class EvaluationReport:
     results: tuple[QuestionResult, ...]
     context: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
+    # Questions écartées de la mesure parce que leur source n'est plus indexée.
+    # Conservées dans le rapport : sans elles, un score qui chute serait
+    # inexplicable six mois plus tard.
+    ignored_ids: tuple[str, ...] = ()
 
     @property
     def count(self) -> int:
@@ -378,10 +432,12 @@ class EvaluationReport:
             "context": self.context,
             "summary": {
                 "count": self.count,
+                "ignored": len(self.ignored_ids),
                 "hit_at_k": round(self.hit_at_k, 4),
                 "mrr": round(self.mrr, 4),
                 "mean_latency_ms": round(self.mean_latency_ms, 1),
             },
+            "ignored_ids": list(self.ignored_ids),
             "results": [result.to_dict() for result in self.results],
         }
 
@@ -404,6 +460,7 @@ class EvaluationReport:
             results=results,
             context=dict(data.get("context") or {}),
             created_at=str(data.get("created_at", "")),
+            ignored_ids=tuple(str(item) for item in (data.get("ignored_ids") or ())),
         )
 
 
@@ -412,6 +469,7 @@ def build_report(
     k: int,
     results: Sequence[QuestionResult],
     context: Mapping[str, Any] | None = None,
+    ignored_ids: Sequence[str] = (),
 ) -> EvaluationReport:
     """Assemble un rapport horodaté (UTC, format ISO 8601)."""
     return EvaluationReport(
@@ -420,6 +478,7 @@ def build_report(
         results=tuple(results),
         context=dict(context or {}),
         created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ignored_ids=tuple(ignored_ids),
     )
 
 
@@ -434,6 +493,16 @@ def accorder(nombre: int, singulier: str, pluriel: str | None = None) -> str:
     if nombre <= 1:
         return f"{nombre} {singulier}"
     return f"{nombre} {pluriel if pluriel is not None else singulier + 's'}"
+
+
+def accorder_question(nombre: int, adjectif: str) -> str:
+    """Accorde le nom « question » ET son adjectif : « 1 question ignorée ».
+
+    Évite les « ignorée(s) » : l'adjectif est donné au féminin singulier, le
+    pluriel étant formé en ajoutant « s ».
+    """
+    suffixe = "" if nombre <= 1 else "s"
+    return f"{accorder(nombre, 'question')} {adjectif}{suffixe}"
 
 
 def _pourcent(value: float) -> str:
@@ -480,6 +549,14 @@ def format_report(report: EvaluationReport) -> str:
         f"{'Introuvable':<17}: {introuvables:>9}",
     ]
 
+    if report.ignored_ids:
+        lignes += [
+            "",
+            f"⚠️  {accorder_question(len(report.ignored_ids), 'ignorée')} : "
+            "source non indexée",
+            f"    {', '.join(report.ignored_ids)}",
+        ]
+
     if report.misses:
         lignes += ["", "Questions non retrouvées :"]
         lignes += [
@@ -501,14 +578,31 @@ def format_comparison(before: EvaluationReport, after: EvaluationReport) -> str:
     empreinte_avant = before.context.get("empreinte_corpus")
     empreinte_apres = after.context.get("empreinte_corpus")
     if empreinte_avant and empreinte_apres and empreinte_avant != empreinte_apres:
+        chunks_avant = before.context.get("chunks_indexes", "?")
+        chunks_apres = after.context.get("chunks_indexes", "?")
         avertissements.append(
-            "⚠️  corpus DIFFÉRENT entre les deux mesures : l'écart peut venir des "
-            "documents,\n    pas du réglage testé."
+            f"⚠️  corpus DIFFÉRENT entre les deux mesures "
+            f"({chunks_avant} → {chunks_apres} chunks) : l'écart peut venir des\n"
+            "    documents et non du réglage testé.\n"
+            "    · Normal si vous testez l'AJOUT de documents (Shamela, par exemple).\n"
+            "    · Suspect si vous testez un réglage (reranker, chunker…) : mesurez\n"
+            "      alors les deux rapports sur le MÊME corpus."
         )
 
     rangs_avant = {result.question_id: result.rank for result in before.results}
     rangs_apres = {result.question_id: result.rank for result in after.results}
     communes = sorted(set(rangs_avant) & set(rangs_apres))
+
+    if set(rangs_avant) != set(rangs_apres):
+        seulement_avant = len(set(rangs_avant) - set(rangs_apres))
+        seulement_apres = len(set(rangs_apres) - set(rangs_avant))
+        avertissements.append(
+            f"⚠️  les deux mesures ne portent pas sur le même jeu de questions "
+            f"({len(rangs_avant)} avant, {len(rangs_apres)} après ; "
+            f"{seulement_avant} seulement avant, {seulement_apres} seulement après).\n"
+            "    Le score global est alors indicatif : seule la comparaison question\n"
+            "    par question reste fiable."
+        )
 
     progres, regressions, stables = 0, 0, 0
     for identifiant in communes:

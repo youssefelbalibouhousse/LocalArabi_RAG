@@ -250,6 +250,30 @@ def test_les_bornes_de_lignes_ne_sont_pas_utilisees():
     assert evaluation.source_matches(resultat_differents, attendu)
 
 
+# --- Questions orphelines -------------------------------------------------
+
+def question_deux_sources() -> GoldenQuestion:
+    """Une question dont la réponse peut venir de deux fichiers."""
+    return GoldenQuestion(
+        id="q1",
+        question="question ?",
+        expected=(ExpectedSource("a.pdf"), ExpectedSource("b.pdf")),
+    )
+
+
+def test_une_question_est_orpheline_si_aucune_source_n_est_indexee():
+    assert evaluation.est_orpheline(question_deux_sources(), {"c.pdf"})
+
+
+def test_une_question_n_est_pas_orpheline_si_une_seule_source_subsiste():
+    """Elle reste parfaitement mesurable : la réponse existe encore quelque part."""
+    assert not evaluation.est_orpheline(question_deux_sources(), {"b.pdf"})
+
+
+def test_une_question_dont_toutes_les_sources_sont_indexees_n_est_pas_orpheline():
+    assert not evaluation.est_orpheline(question_deux_sources(), {"a.pdf", "b.pdf"})
+
+
 # --- Rang du premier résultat correct -------------------------------------
 
 def test_le_rang_du_premier_resultat_correct_est_trouve():
@@ -323,6 +347,35 @@ def test_l_empreinte_distingue_les_decoupages_des_identifiants():
     assert evaluation.corpus_fingerprint(["ab"]) != evaluation.corpus_fingerprint(["a", "b"])
 
 
+def test_l_empreinte_distingue_un_identifiant_double():
+    """Un XOR seul s'annulerait : le nombre d'identifiants est incorporé à part."""
+    assert evaluation.corpus_fingerprint(["a", "a"]) != evaluation.corpus_fingerprint(["a"])
+
+
+def test_l_empreinte_distingue_un_corpus_vide():
+    """Justifie l'incorporation du nombre : un XOR seul donnerait 0 dans les deux cas."""
+    assert evaluation.corpus_fingerprint([]) != evaluation.corpus_fingerprint(["a", "a"])
+
+
+def test_l_accumulateur_se_calcule_en_flux():
+    """À 23 millions de chunks, trier la liste complète coûterait des gigaoctets.
+
+    L'ordre étant indifférent (XOR), les identifiants peuvent être incorporés un
+    par un puis oubliés : c'est tout l'intérêt de l'accumulateur.
+    """
+    accumulateur = evaluation.CorpusFingerprint()
+    accumulateur.add("a")
+    accumulateur.add("b")
+
+    assert accumulateur.hexdigest() == evaluation.corpus_fingerprint(["a", "b"])
+
+
+def test_l_empreinte_accepte_un_simple_generateur():
+    assert evaluation.corpus_fingerprint(iter(["a", "b"])) == (
+        evaluation.corpus_fingerprint(["a", "b"])
+    )
+
+
 # --- Agrégation d'un rapport ---------------------------------------------
 
 def test_les_metriques_agregees_sont_correctes():
@@ -338,6 +391,29 @@ def test_les_questions_introuvees_sont_listees():
     rapport_test = rapport("t", {"q1": 1, "q2": None})
 
     assert [resultat.question_id for resultat in rapport_test.misses] == ["q2"]
+
+
+def test_les_questions_ignorees_sont_conservees_dans_le_rapport():
+    """Sans elles dans le rapport, un score qui chute serait inexplicable plus tard."""
+    rapport_test = evaluation.build_report(
+        label="t",
+        k=5,
+        results=[resultat("q1", 1)],
+        ignored_ids=["q7", "q8"],
+    )
+
+    assert rapport_test.ignored_ids == ("q7", "q8")
+    assert rapport_test.to_dict()["summary"]["ignored"] == 2
+
+
+def test_les_questions_ignorees_survivent_a_un_aller_retour_json():
+    origine = evaluation.build_report(
+        label="t", k=5, results=[resultat("q1", 1)], ignored_ids=["q7"]
+    )
+
+    relu = EvaluationReport.from_dict(json.loads(json.dumps(origine.to_dict())))
+
+    assert relu.ignored_ids == ("q7",)
 
 
 def test_un_rapport_vide_ne_divise_pas_par_zero():
@@ -390,6 +466,19 @@ def test_l_accord_suit_la_regle_francaise_du_zero_singulier(nombre, attendu):
 
 def test_un_pluriel_irregulier_peut_etre_fourni():
     assert evaluation.accorder(3, "cheval", "chevaux") == "3 chevaux"
+
+
+@pytest.mark.parametrize(
+    ("nombre", "attendu"),
+    [
+        (1, "1 question ignorée"),
+        (2, "2 questions ignorées"),
+        (0, "0 question ignorée"),
+    ],
+)
+def test_l_adjectif_est_accorde_avec_le_nom(nombre, attendu):
+    """Évite les « ignorée(s) » : le nom et l'adjectif s'accordent ensemble."""
+    assert evaluation.accorder_question(nombre, "ignorée") == attendu
 
 
 # --- Affichage ------------------------------------------------------------
@@ -448,6 +537,27 @@ def test_la_comparaison_alerte_si_le_top_k_differe():
     texte = evaluation.format_comparison(avant, apres)
 
     assert "top-k différent" in texte
+
+
+def test_le_rapport_signale_les_questions_ignorees():
+    rapport_test = evaluation.build_report(
+        label="t", k=5, results=[resultat("q1", 1)], ignored_ids=["q7"]
+    )
+
+    texte = evaluation.format_report(rapport_test)
+
+    assert "1 question ignorée" in texte
+    assert "q7" in texte
+
+
+def test_la_comparaison_alerte_si_les_jeux_de_questions_different():
+    """Un jeu d'or qui grandit entre deux mesures rend le score global trompeur."""
+    avant = rapport("avant", {"q1": 1, "q2": 2}, k=5)
+    apres = rapport("apres", {"q1": 1}, k=5)
+
+    texte = evaluation.format_comparison(avant, apres)
+
+    assert "même jeu de questions" in texte
 
 
 def test_une_comparaison_sans_avertissement_quand_tout_concorde():

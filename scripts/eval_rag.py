@@ -88,17 +88,28 @@ def afficher(texte: str) -> None:
 
 # --- Accès à la base vectorielle -----------------------------------------
 
-def tous_les_identifiants(collection, taille_lot: int = 5000) -> list[str]:
-    """Récupère tous les identifiants de la collection, par lots bornés.
+def inventorier_corpus(collection, taille_lot: int = 5000):
+    """Parcourt la collection UNE fois : empreinte du corpus + sources indexées.
 
-    On demande uniquement les métadonnées, jamais les textes ni les vecteurs :
-    c'est la charge la plus faible disponible pour obtenir les identifiants, qui
-    sont de toute façon toujours renvoyés par l'API ChromaDB.
+    Renvoie ``(accumulateur_d_empreinte, noms_de_fichiers)``.
 
-    La lecture par lots évite de tout charger d'un coup : la mémoire reste bornée
-    quelle que soit la taille de la base.
+    Un seul parcours pour deux besoins — l'empreinte du corpus (les identifiants)
+    et la détection des questions orphelines (les noms de fichiers) : parcourir
+    deux fois une base de plusieurs millions de chunks doublerait le temps de
+    l'inventaire sans rien apporter.
+
+    Rien n'est conservé en mémoire hormis les NOMS DE FICHIERS — quelques milliers
+    de chaînes, même pour la bibliothèque Shamela entière. L'empreinte, elle, est
+    calculée au fil de l'eau (voir ``evaluation.CorpusFingerprint``) : à 23 millions
+    de chunks, constituer la liste complète des identifiants pour la trier
+    demanderait plusieurs gigaoctets.
+
+    On ne demande que les métadonnées, jamais les textes ni les vecteurs : c'est
+    la charge la plus faible disponible, les identifiants étant de toute façon
+    toujours renvoyés par l'API ChromaDB.
     """
-    identifiants: list[str] = []
+    empreinte = evaluation.CorpusFingerprint()
+    sources: set[str] = set()
     offset = 0
 
     while True:
@@ -106,12 +117,18 @@ def tous_les_identifiants(collection, taille_lot: int = 5000) -> list[str]:
         ids = list(lot.get("ids") or [])
         if not ids:
             break
-        identifiants.extend(ids)
+
+        empreinte.update(ids)
+        for meta in lot.get("metadatas") or []:
+            source = (meta or {}).get("source")
+            if source:
+                sources.add(source)
+
         if len(ids) < taille_lot:
             break
         offset += taille_lot
 
-    return identifiants
+    return empreinte, sources
 
 
 def extraits_aleatoires(collection, nombre: int, seed: int) -> list[dict]:
@@ -149,12 +166,15 @@ def extraits_aleatoires(collection, nombre: int, seed: int) -> list[dict]:
     return extraits
 
 
-def mise_en_contexte(collection, k: int, questions: list) -> dict:
+def mise_en_contexte(collection, k: int, questions: list, empreinte, sources: set) -> dict:
     """Photographie de la configuration au moment de la mesure.
 
     Indispensable : un rapport dont on ignore le modèle, la taille de chunk ou la
     taille du corpus est inexploitable six mois plus tard — on ne saurait pas
     expliquer l'écart constaté.
+
+    L'empreinte et les sources sont fournies par l'appelant : elles viennent du
+    même parcours de la collection, qu'on ne refait donc pas ici.
     """
     return {
         "pipeline": "vectoriel seul",
@@ -164,7 +184,8 @@ def mise_en_contexte(collection, k: int, questions: list) -> dict:
         "k_evalue": k,
         "seuil_distance": config.DISTANCE_THRESHOLD,
         "chunks_indexes": collection.count(),
-        "empreinte_corpus": evaluation.corpus_fingerprint(tous_les_identifiants(collection)),
+        "fichiers_indexes": len(sources),
+        "empreinte_corpus": empreinte.hexdigest(),
         "questions_draft": sum(
             1 for question in questions if question.status == evaluation.STATUS_DRAFT
         ),
@@ -246,13 +267,51 @@ def mode_run(args: argparse.Namespace) -> int:
         )
         return 1
 
+    empreinte, sources_indexees = inventorier_corpus(collection)
+
+    a_mesurer = [
+        question
+        for question in questions
+        if not evaluation.est_orpheline(question, sources_indexees)
+    ]
+    orphelines = [
+        question
+        for question in questions
+        if evaluation.est_orpheline(question, sources_indexees)
+    ]
+
+    if not a_mesurer:
+        afficher(
+            "❌ Aucune question mesurable : la source d'AUCUNE d'entre elles n'est "
+            "indexée.\n"
+            "   Les documents correspondants ont-ils été retirés de data/documents/ ?"
+        )
+        return 1
+
     afficher(
-        f"Mesure de {evaluation.accorder(len(questions), 'question')} "
+        f"Mesure de {evaluation.accorder(len(a_mesurer), 'question')} "
         f"(top-{args.k}) sur {evaluation.accorder(total, 'chunk')}…"
     )
 
+    if orphelines:
+        afficher("")
+        afficher(
+            f"⚠️  {evaluation.accorder_question(len(orphelines), 'ignorée')} : "
+            "source non indexée."
+        )
+        for question in orphelines:
+            attendues = ", ".join(source.source for source in question.expected)
+            afficher(f"    · {question.id} — {attendues}")
+        afficher(
+            "    Exclues du calcul : comptées « introuvables », elles feraient chuter\n"
+            "    le score à cause d'un document retiré du corpus, et non de la\n"
+            "    qualité de la récupération.\n"
+            "    Réindexez le document, ou retirez la question du jeu d'or."
+        )
+        afficher("")
+
     resultats = []
-    for question in questions:
+    for question in a_mesurer:
         debut = time.perf_counter()
         try:
             _, sources = rag.retrieve(collection, question.question, n_results=args.k)
@@ -277,7 +336,10 @@ def mode_run(args: argparse.Namespace) -> int:
         label=label,
         k=args.k,
         results=resultats,
-        context=mise_en_contexte(collection, args.k, questions),
+        context=mise_en_contexte(
+            collection, args.k, a_mesurer, empreinte, sources_indexees
+        ),
+        ignored_ids=[question.id for question in orphelines],
     )
 
     args.results_dir.mkdir(parents=True, exist_ok=True)
