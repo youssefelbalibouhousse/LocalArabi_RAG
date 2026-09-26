@@ -31,7 +31,7 @@ import sqlite3
 import sys
 import tarfile
 import tempfile
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -45,6 +45,7 @@ from app import config
 ARCHIVE_PREFIX = "backup_"
 ARCHIVE_SUFFIX = ".tar.gz"
 MANIFEST_NAME = "MANIFEST.json"
+LOG_NAME = "backup.log"
 
 
 @dataclass(frozen=True)
@@ -403,44 +404,28 @@ def _afficher_liste(destination: Path) -> int:
     return 0
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Sauvegarde et restauration des données du projet (règle 3-2-1).",
-        epilog=(
-            "Exemples :\n"
-            "  python scripts/backup.py                       # crée une archive\n"
-            "  python scripts/backup.py --list                # liste les archives\n"
-            "  python scripts/backup.py --no-vectors          # sans la base vectorielle\n"
-            "  python scripts/backup.py --restore <archive>   # restaure\n"
-        ),
-    )
-    parser.add_argument("--list", action="store_true", help="liste les archives existantes")
-    parser.add_argument("--restore", metavar="ARCHIVE", help="restaure une archive")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="avec --restore : vérifie l'archive sans écrire aucun fichier",
-    )
-    parser.add_argument(
-        "--no-vectors",
-        action="store_true",
-        help="exclut la base vectorielle (donnée dérivée, reconstruite par build_kb.py)",
-    )
-    parser.add_argument(
-        "--output-dir",
-        metavar="DOSSIER",
-        help=f"dossier des archives (défaut : {config.BACKUP_DIR})",
-    )
-    parser.add_argument(
-        "--keep",
-        type=int,
-        metavar="N",
-        help=f"nombre d'archives conservées (défaut : {config.BACKUP_RETENTION})",
-    )
-    args = parser.parse_args()
+class _Tee:
+    """Écrit dans PLUSIEURS flux à la fois (ici : la console et le journal).
 
-    destination = Path(args.output_dir) if args.output_dir else config.BACKUP_DIR
+    Sert à l'option `--log`. Le nom vient du « T » des plomberies : un flux
+    d'entrée, deux sorties — comme un raccord en T.
+    """
 
+    def __init__(self, *flux):
+        self.flux = flux
+
+    def write(self, texte):
+        for flux in self.flux:
+            flux.write(texte)
+        return len(texte)
+
+    def flush(self):
+        for flux in self.flux:
+            flux.flush()
+
+
+def _executer(args, destination: Path) -> int:
+    """Effectue l'action demandée : lister, restaurer ou créer."""
     if args.list:
         return _afficher_liste(destination)
 
@@ -463,7 +448,91 @@ def main() -> int:
     archive = create_backup(
         destination, keep=args.keep, include_vectors=not args.no_vectors
     )
-    return 0 if archive else 1
+    if archive is None:
+        return 1
+
+    if not args.verify:
+        return 0
+
+    # On PROUVE immédiatement que l'archive est exploitable. C'est ce qui rend
+    # automatique la règle « une sauvegarde jamais restaurée n'existe pas » :
+    # plus besoin d'y penser, la vérification fait partie de la sauvegarde.
+    print("🔎 Vérification de l'archive qui vient d'être créée…")
+    try:
+        restore_backup(archive, dry_run=True)
+    except (ValueError, FileNotFoundError, tarfile.TarError) as exc:
+        print(f"❌ L'archive créée est invalide : {exc}")
+        return 1
+
+    print("✅ Sauvegarde créée ET vérifiée.")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Sauvegarde et restauration des données du projet (règle 3-2-1).",
+        epilog=(
+            "Exemples :\n"
+            "  python scripts/backup.py                       # crée une archive\n"
+            "  python scripts/backup.py --verify --log        # crée, vérifie, journalise\n"
+            "  python scripts/backup.py --list                # liste les archives\n"
+            "  python scripts/backup.py --no-vectors          # sans la base vectorielle\n"
+            "  python scripts/backup.py --restore <archive>   # restaure\n"
+        ),
+    )
+    parser.add_argument("--list", action="store_true", help="liste les archives existantes")
+    parser.add_argument("--restore", metavar="ARCHIVE", help="restaure une archive")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="avec --restore : vérifie l'archive sans écrire aucun fichier",
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="après la création, vérifie l'archive (empreintes SHA-256) — usage planifié",
+    )
+    parser.add_argument(
+        "--log",
+        action="store_true",
+        help=f"ajoute la sortie à {LOG_NAME} (indispensable en exécution planifiée)",
+    )
+    parser.add_argument(
+        "--no-vectors",
+        action="store_true",
+        help="exclut la base vectorielle (donnée dérivée, reconstruite par build_kb.py)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        metavar="DOSSIER",
+        help=f"dossier des archives (défaut : {config.BACKUP_DIR})",
+    )
+    parser.add_argument(
+        "--keep",
+        type=int,
+        metavar="N",
+        help=f"nombre d'archives conservées (défaut : {config.BACKUP_RETENTION})",
+    )
+    args = parser.parse_args()
+
+    destination = Path(args.output_dir) if args.output_dir else config.BACKUP_DIR
+
+    if not args.log:
+        return _executer(args, destination)
+
+    # Journalisation : tout ce qui s'affiche part aussi dans le journal, horodaté,
+    # y compris le CODE DE SORTIE. Sans trace écrite, une sauvegarde planifiée qui
+    # échoue échoue en silence — le pire scénario pour un mécanisme de sécurité.
+    destination.mkdir(parents=True, exist_ok=True)
+    with (
+        (destination / LOG_NAME).open("a", encoding="utf-8") as journal,
+        redirect_stdout(_Tee(sys.stdout, journal)),
+    ):
+        print(f"\n=== {datetime.now():%Y-%m-%d %H:%M:%S} ===")
+        code = _executer(args, destination)
+        print(f"--- code de sortie : {code} ---")
+
+    return code
 
 
 if __name__ == "__main__":

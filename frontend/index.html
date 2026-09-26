@@ -1,464 +1,152 @@
 <!DOCTYPE html>
-<html lang="ar">
+<!-- dir="rtl" et lang="ar" correspondent à l'état INITIAL : avant tout choix,
+     l'application s'affiche en arabe. app.js ajuste ensuite selon la langue
+     mémorisée. Le HTML est donc complet et lisible même sans JavaScript. -->
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>مساعد RAG الذكي</title>
-    <!-- Tailwind CSS for beautiful styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-50 h-screen flex flex-col justify-between font-sans">
+    <!-- viewport-fit=cover : indispensable pour atteindre les zones sûres
+         (encoche, barre gestuelle) depuis le CSS. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light">
+    <!-- Teinte la barre du navigateur mobile, qui prolonge l'en-tête vert. -->
+    <meta name="theme-color" content="#0e3b2e">
 
-    <!-- Chat Header -->
-    <header class="bg-indigo-600 text-white p-4 shadow-md">
-        <div class="max-w-2xl mx-auto flex items-center justify-between gap-3">
-            <div>
-                <h1 id="app-title" class="text-xl font-bold">مساعد الـ RAG الذكي للمستندات العربية 🤖</h1>
-                <p class="text-xs opacity-90 mt-1">FastAPI & ChromaDB & Ollama</p>
-            </div>
-            <div class="flex items-center gap-2 shrink-0">
-                <button id="lang-back-btn" type="button" title="Changer de langue" class="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-sm transition-all">🌐</button>
-                <div id="user-bar" class="hidden items-center gap-2">
-                    <span id="user-name" class="text-sm font-semibold"></span>
-                    <button id="logout-btn" type="button" class="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-sm transition-all">تسجيل الخروج</button>
+    <title>مساعد البحث في المستندات</title>
+
+    <!-- DEUX voix typographiques, et c'est volontaire :
+           - IBM Plex Sans Arabic : la parole de l'outil ;
+           - Noto Naskh Arabic    : la parole CITÉE (la police du manuscrit).
+         font-display: swap -> le texte s'affiche tout de suite dans la police de
+         repli, puis se substitue. Jamais de texte invisible pendant le chargement. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;family=Noto+Naskh+Arabic:wght@400;600&amp;display=swap">
+
+    <!-- Feuille COMPILÉE (npm run build:css).
+         Aucun CDN, aucun compilateur dans le navigateur, aucune dépendance
+         réseau : la page s'affiche même hors ligne. -->
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+    <div class="shell">
+
+        <!-- ================= En-tête ================= -->
+        <header class="masthead">
+            <div class="masthead__row">
+                <div>
+                    <h1 id="app-title" class="masthead__title">مساعد البحث في المستندات</h1>
+                    <p id="app-subtitle" class="masthead__subtitle">الإجابة مع الاستشهاد بالمصدر: الملف والصفحة والأسطر</p>
+                </div>
+
+                <div class="masthead__actions">
+                    <button id="lang-back-btn" type="button" class="icon-btn hidden"
+                            title="تغيير اللغة" aria-label="تغيير اللغة">
+                        <svg viewBox="0 0 16 16" width="16" height="16" fill="none"
+                             stroke="currentColor" stroke-width="1.2" aria-hidden="true"
+                             focusable="false">
+                            <circle cx="8" cy="8" r="6.25"/>
+                            <path d="M1.75 8h12.5"/>
+                            <path d="M8 1.75c1.9 2 2.9 4.1 2.9 6.25S9.9 12.25 8 14.25C6.1 12.25 5.1 10.15 5.1 8S6.1 3.75 8 1.75Z"/>
+                        </svg>
+                    </button>
+
+                    <div id="user-bar" class="user-chip hidden">
+                        <span id="user-name" class="user-chip__name"></span>
+                        <button id="logout-btn" type="button" class="btn btn--quiet">خروج</button>
+                    </div>
                 </div>
             </div>
-        </div>
-    </header>
 
-    <!-- Language selection Panel -->
-    <main id="lang-panel" class="flex-1 flex items-center justify-center p-6">
-        <div class="bg-white w-full max-w-sm p-6 rounded-2xl shadow-md border border-slate-100 text-center">
-            <h2 class="text-lg font-bold text-slate-800 mb-6">اختر لغتك / Choisissez votre langue</h2>
-            <div class="grid grid-cols-2 gap-3">
-                <button id="lang-ar" type="button" class="py-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-lg font-semibold transition-all">العربية</button>
-                <button id="lang-fr" type="button" class="py-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-lg font-semibold transition-all">Français</button>
+            <!-- LE SEUL ornement de toute l'interface : un bandeau géométrique à
+                 huit branches. Un carré, et le même pivoté de 45°. Géométrique et
+                 non floral : c'est ce qui le garde austère au lieu de décoratif. -->
+            <svg class="ornament" width="100%" height="10" aria-hidden="true" focusable="false">
+                <defs>
+                    <pattern id="girih" width="16" height="10" patternUnits="userSpaceOnUse">
+                        <g fill="none" stroke="currentColor" stroke-width="0.7">
+                            <rect x="5" y="2" width="6" height="6"/>
+                            <rect x="5" y="2" width="6" height="6" transform="rotate(45 8 5)"/>
+                        </g>
+                    </pattern>
+                </defs>
+                <rect width="100%" height="10" fill="url(#girih)"/>
+            </svg>
+        </header>
+
+        <!-- ================= Choix de la langue ================= -->
+        <!-- Volontairement masqué ici : app.js l'affiche uniquement si aucune
+             langue n'est mémorisée. Cela évite le bref affichage de cet écran
+             pour un utilisateur déjà connecté. -->
+        <main id="lang-panel" class="stage hidden">
+            <div class="stage__panel card">
+                <h2 class="card__title">اختر لغتك / Choisissez votre langue</h2>
+                <div class="lang-grid">
+                    <button id="lang-ar" type="button" class="lang-btn lang-btn--active">العربية</button>
+                    <button id="lang-fr" type="button" class="lang-btn">Français</button>
+                </div>
             </div>
-        </div>
-    </main>
+        </main>
 
-    <!-- Login / Register Panel -->
-    <main id="auth-panel" class="hidden flex-1 flex items-center justify-center p-6">
-        <div class="bg-white w-full max-w-sm p-6 rounded-2xl shadow-md border border-slate-100">
-            <h2 id="login-title" class="text-lg font-bold text-slate-800 mb-4 text-right" dir="rtl">تسجيل الدخول</h2>
-            <form id="auth-form" class="space-y-3" dir="rtl">
-                <input
-                    type="text"
-                    id="auth-username"
-                    placeholder="اسم المستخدم"
-                    required
-                    class="w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-right text-slate-800"
-                >
-                <input
-                    type="password"
-                    id="auth-password"
-                    placeholder="كلمة المرور"
-                    required
-                    class="w-full border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-right text-slate-800"
-                >
-                <p id="auth-error" class="text-sm text-red-600 hidden text-right"></p>
-                <button
-                    type="submit"
-                    id="login-btn"
-                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-xl font-semibold transition-all shadow-sm"
-                >
-                    تسجيل الدخول
-                </button>
-                <button
-                    type="button"
-                    id="register-btn"
-                    class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-semibold transition-all"
-                >
-                    إنشاء حساب جديد
-                </button>
+        <!-- ================= Connexion ================= -->
+        <main id="auth-panel" class="stage hidden">
+            <div class="stage__panel card">
+                <h2 id="login-title" class="card__title">تسجيل الدخول</h2>
+
+                <form id="auth-form" class="stack">
+                    <input type="text" id="auth-username" class="field"
+                           placeholder="اسم المستخدم" autocomplete="username"
+                           aria-label="اسم المستخدم" required>
+
+                    <input type="password" id="auth-password" class="field"
+                           placeholder="كلمة المرور" autocomplete="current-password"
+                           aria-label="كلمة المرور" required>
+
+                    <p id="auth-error" class="error hidden" role="alert"></p>
+
+                    <button type="submit" id="login-btn" class="btn btn--primary btn--block">
+                        تسجيل الدخول
+                    </button>
+                    <button type="button" id="register-btn" class="btn btn--outline btn--block">
+                        إنشاء حساب
+                    </button>
+                </form>
+            </div>
+        </main>
+
+        <!-- ================= Conversation =================
+             role="log" + aria-live : les nouvelles réponses sont annoncées aux
+             lecteurs d'écran sans voler le focus. -->
+        <main id="chat-window" class="thread hidden"
+              role="log" aria-live="polite" aria-label="المحادثة"></main>
+
+        <!-- ================= Zone de saisie ================= -->
+        <footer id="composer" class="composer hidden">
+            <form id="chat-form" class="composer__row">
+                <input type="text" id="user-input" class="field composer__field"
+                       placeholder="اكتب سؤالك…" aria-label="سؤالك"
+                       autocomplete="off" required>
+                <button type="submit" id="send-btn" class="btn btn--primary">إرسال</button>
             </form>
-        </div>
-    </main>
+        </footer>
 
-    <!-- Chat Window -->
-    <main id="chat-window" class="hidden flex-1 p-6 overflow-y-auto space-y-4 max-w-2xl mx-auto w-full"></main>
+        <!-- Aucun écran ne s'affiche sans JavaScript : on le dit clairement
+             plutôt que de laisser une page vide. -->
+        <noscript>
+            <div class="stage">
+                <div class="stage__panel card">
+                    <h2 class="card__title">JavaScript est nécessaire</h2>
+                    <p class="citation__refs">
+                        Cette application a besoin de JavaScript pour fonctionner.<br>
+                        يحتاج هذا التطبيق إلى JavaScript ليعمل.
+                    </p>
+                </div>
+            </div>
+        </noscript>
 
-    <!-- Chat Input Area -->
-    <footer class="hidden bg-white p-4 border-t border-slate-200 shadow-inner w-full">
-        <form id="chat-form" class="max-w-2xl mx-auto flex gap-2">
-            <input
-                type="text"
-                id="user-input"
-                placeholder="اكتب سؤالك باللغة العربية هنا..."
-                class="flex-1 border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-right text-slate-800"
-                dir="rtl"
-                required
-            >
-            <button
-                type="submit"
-                id="send-btn"
-                class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-semibold transition-all shadow-sm"
-            >
-                إرسال
-            </button>
-        </form>
-    </footer>
+    </div>
 
-    <script>
-        // API servie sur la MÊME origine que ce frontend (via le reverse proxy
-        // en production). Une chaîne vide signifie "utilise l'origine courante".
-        const API_BASE = '';
-
-        // --- Traductions -------------------------------------------------
-        const I18N = {
-            ar: {
-                appTitle: 'مساعد الـ RAG الذكي للمستندات العربية 🤖',
-                logout: 'تسجيل الخروج',
-                changeLang: 'تغيير اللغة',
-                loginTitle: 'تسجيل الدخول',
-                username: 'اسم المستخدم',
-                password: 'كلمة المرور',
-                login: 'تسجيل الدخول',
-                register: 'إنشاء حساب جديد',
-                registerRequired: 'يرجى إدخال اسم المستخدم وكلمة المرور.',
-                inputPlaceholder: 'اكتب سؤالك هنا...',
-                send: 'إرسال',
-                loading: 'يجري البحث في مستنداتك وصياغة الإجابة...',
-                processingError: 'عذرًا، واجهت مشكلة في معالجة سؤالك.',
-                connectionError: 'عذرًا، لم أتمكن من الاتصال بخادم الـ API الخاص بك.',
-                welcome: (n) => `مرحباً بك ${n}! أنا مساعدك الذكي. اسألني أي سؤال حول مستندات الـ PDF الخاصة بك وسأبحث عنها وأجيبك فوراً.`
-            },
-            fr: {
-                appTitle: 'Assistant RAG intelligent pour vos documents 📚',
-                logout: 'Se déconnecter',
-                changeLang: 'Changer de langue',
-                loginTitle: 'Connexion',
-                username: "Nom d'utilisateur",
-                password: 'Mot de passe',
-                login: 'Se connecter',
-                register: 'Créer un compte',
-                registerRequired: "Veuillez saisir un nom d'utilisateur et un mot de passe.",
-                inputPlaceholder: 'Écrivez votre question...',
-                send: 'Envoyer',
-                loading: 'Recherche dans vos documents et rédaction de la réponse...',
-                processingError: "Désolé, une erreur est survenue lors du traitement de votre question.",
-                connectionError: "Désolé, impossible de contacter le serveur de l'API.",
-                welcome: (n) => `Bonjour ${n} ! Je suis votre assistant. Posez-moi une question sur vos documents PDF et je vous répondrai immédiatement.`
-            }
-        };
-
-        let currentLang = localStorage.getItem('chatbot_language') || null;
-
-        // --- Éléments du DOM ---------------------------------------------
-        const chatWindow = document.getElementById('chat-window');
-        const chatForm = document.getElementById('chat-form');
-        const userInput = document.getElementById('user-input');
-        const sendBtn = document.getElementById('send-btn');
-        const langPanel = document.getElementById('lang-panel');
-        const langAr = document.getElementById('lang-ar');
-        const langFr = document.getElementById('lang-fr');
-        const authPanel = document.getElementById('auth-panel');
-        const authForm = document.getElementById('auth-form');
-        const authUsername = document.getElementById('auth-username');
-        const authPassword = document.getElementById('auth-password');
-        const authError = document.getElementById('auth-error');
-        const registerBtn = document.getElementById('register-btn');
-        const loginBtn = document.getElementById('login-btn');
-        const loginTitle = document.getElementById('login-title');
-        const appTitle = document.getElementById('app-title');
-        const userBar = document.getElementById('user-bar');
-        const userNameEl = document.getElementById('user-name');
-        const logoutBtn = document.getElementById('logout-btn');
-        const langBackBtn = document.getElementById('lang-back-btn');
-        const footer = document.querySelector('footer');
-
-        function t(key) { return I18N[currentLang][key]; }
-
-        // --- Application de la langue choisie ----------------------------
-        function applyLang() {
-            const isRtl = currentLang === 'ar';
-            document.documentElement.lang = currentLang;
-            document.documentElement.dir = isRtl ? 'rtl' : 'ltr';
-            document.title = I18N[currentLang].appTitle;
-
-            appTitle.textContent = I18N[currentLang].appTitle;
-            logoutBtn.textContent = I18N[currentLang].logout;
-            loginTitle.textContent = I18N[currentLang].loginTitle;
-            authUsername.placeholder = I18N[currentLang].username;
-            authPassword.placeholder = I18N[currentLang].password;
-            loginBtn.textContent = I18N[currentLang].login;
-            registerBtn.textContent = I18N[currentLang].register;
-            userInput.placeholder = I18N[currentLang].inputPlaceholder;
-            sendBtn.textContent = I18N[currentLang].send;
-            langBackBtn.textContent = '🌐 ' + I18N[currentLang].changeLang;
-
-            [authForm, loginTitle, authError].forEach(el => el.setAttribute('dir', isRtl ? 'rtl' : 'ltr'));
-            [authUsername, authPassword].forEach(el => {
-                el.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
-                el.style.textAlign = isRtl ? 'right' : 'left';
-            });
-            userInput.setAttribute('dir', isRtl ? 'rtl' : 'ltr');
-            userInput.style.textAlign = isRtl ? 'right' : 'left';
-        }
-
-        function showLangPanel() {
-            chatWindow.innerHTML = '';
-            langPanel.classList.remove('hidden');
-            authPanel.classList.add('hidden');
-            chatWindow.classList.add('hidden');
-            userBar.classList.add('hidden');
-            footer.classList.add('hidden');
-            langBackBtn.classList.add('hidden');
-        }
-
-        function chooseLang(lang) {
-            currentLang = lang;
-            localStorage.setItem('chatbot_language', lang);
-            applyLang();
-            langPanel.classList.add('hidden');
-            langBackBtn.classList.remove('hidden');
-            initAfterLang();
-        }
-
-        langAr.addEventListener('click', () => chooseLang('ar'));
-        langFr.addEventListener('click', () => chooseLang('fr'));
-        langBackBtn.addEventListener('click', showLangPanel);
-
-        // --- Gestion du jeton d'authentification ---
-        function getToken() { return localStorage.getItem('chatbot_token'); }
-        function setToken(token) { localStorage.setItem('chatbot_token', token); }
-        function clearToken() { localStorage.removeItem('chatbot_token'); }
-
-        function showAuth() {
-            clearToken();
-            langPanel.classList.add('hidden');
-            authPanel.classList.remove('hidden');
-            chatWindow.classList.add('hidden');
-            userBar.classList.add('hidden');
-            footer.classList.add('hidden');
-            langBackBtn.classList.remove('hidden');
-        }
-
-        function showChat(username) {
-            langPanel.classList.add('hidden');
-            authPanel.classList.add('hidden');
-            chatWindow.classList.remove('hidden');
-            userBar.classList.remove('hidden');
-            footer.classList.remove('hidden');
-            langBackBtn.classList.remove('hidden');
-            userNameEl.textContent = username;
-        }
-
-        function showAuthError(message) {
-            authError.textContent = message;
-            authError.classList.remove('hidden');
-        }
-        function hideAuthError() { authError.classList.add('hidden'); }
-
-        // Enveloppe fetch : ajoute le jeton et gère automatiquement le 401.
-        async function apiFetch(path, options = {}) {
-            const headers = { ...(options.headers || {}) };
-            const token = getToken();
-            if (token) headers['Authorization'] = 'Bearer ' + token;
-
-            const response = await fetch(API_BASE + path, { ...options, headers });
-
-            if (response.status === 401) {
-                showAuth();
-                throw new Error('unauthorized');
-            }
-            return response;
-        }
-
-        // --- Connexion / inscription ---
-        async function login(username, password) {
-            const response = await fetch(API_BASE + '/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({ username, password }),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || t('processingError'));
-            setToken(data.access_token);
-        }
-
-        async function register(username, password) {
-            const response = await fetch(API_BASE + '/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || t('processingError'));
-            return data.username;
-        }
-
-        authForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            hideAuthError();
-            const username = authUsername.value.trim();
-            const password = authPassword.value;
-            if (!username || !password) return;
-
-            try {
-                await login(username, password);
-                authForm.reset();
-                showChat(username);
-            } catch (err) {
-                showAuthError(err.message);
-            }
-        });
-
-        registerBtn.addEventListener('click', async () => {
-            hideAuthError();
-            const username = authUsername.value.trim();
-            const password = authPassword.value;
-            if (!username || !password) {
-                showAuthError(t('registerRequired'));
-                return;
-            }
-            try {
-                await register(username, password);
-                await login(username, password);
-                authForm.reset();
-                showChat(username);
-            } catch (err) {
-                showAuthError(err.message);
-            }
-        });
-
-        logoutBtn.addEventListener('click', () => {
-            chatWindow.innerHTML = '';
-            showAuth();
-        });
-
-        // --- Chat ---
-        function bubbleClass(isUser) {
-            const align = currentLang === 'ar' ? 'text-right' : 'text-left';
-            return isUser
-                ? `bg-indigo-600 text-white p-3 rounded-2xl shadow-md max-w-md ${align}`
-                : `bg-white text-slate-800 p-3 rounded-2xl shadow-sm border border-slate-100 max-w-md ${align}`;
-        }
-
-        function appendWelcomeMessage(name) {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'flex justify-start';
-            const bubble = document.createElement('div');
-            bubble.className = bubbleClass(false);
-            bubble.setAttribute('dir', currentLang === 'ar' ? 'rtl' : 'ltr');
-            bubble.textContent = I18N[currentLang].welcome(name);
-            wrapper.appendChild(bubble);
-            chatWindow.appendChild(wrapper);
-        }
-
-        function appendMessage(text, isUser = false) {
-            const wrapper = document.createElement('div');
-            wrapper.className = isUser ? 'flex justify-end' : 'flex justify-start';
-
-            const bubble = document.createElement('div');
-            bubble.className = bubbleClass(isUser);
-            bubble.setAttribute('dir', currentLang === 'ar' ? 'rtl' : 'ltr');
-            bubble.textContent = text;
-
-            wrapper.appendChild(bubble);
-            chatWindow.appendChild(wrapper);
-
-            // Auto scroll to bottom
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
-
-        // Handle sending message
-        chatForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const question = userInput.value.trim();
-            if (!question) return;
-
-            // Append User Question
-            appendMessage(question, true);
-            userInput.value = '';
-
-            // Show Loading Indicator
-            const loadingWrapper = document.createElement('div');
-            loadingWrapper.className = 'flex justify-start';
-            const loadingBubble = document.createElement('div');
-            loadingBubble.className = 'bg-slate-200 text-slate-500 p-3 rounded-2xl shadow-sm text-sm';
-            loadingBubble.textContent = t('loading');
-            loadingWrapper.appendChild(loadingBubble);
-            chatWindow.appendChild(loadingWrapper);
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-
-            try {
-                const response = await apiFetch(`/ask?question=${encodeURIComponent(question)}&language=${currentLang}`);
-                const data = await response.json();
-
-                // Remove loading indicator
-                chatWindow.removeChild(loadingWrapper);
-
-                if (response.ok) {
-                    appendMessage(data.answer, false);
-                } else {
-                    appendMessage(data.detail || t('processingError'), false);
-                }
-            } catch (error) {
-                if (loadingWrapper.parentNode) chatWindow.removeChild(loadingWrapper);
-                if (error.message !== 'unauthorized') {
-                    appendMessage(t('connectionError'), false);
-                }
-                console.error('Error connecting to backend:', error);
-            }
-        });
-
-        // --- Initialisation ---
-        function initAfterLang() {
-            const token = getToken();
-            if (!token) { showAuth(); return; }
-
-            apiFetch('/me')
-                .then(response => response.ok ? response.json() : null)
-                .then(data => {
-                    if (data) {
-                        appendWelcomeMessage(data.username);
-                        showChat(data.username);
-                    } else {
-                        showAuth();
-                    }
-                })
-                .catch(() => showAuth());
-        }
-
-        // --- Configuration publique (non sensible) ------------------------
-        async function loadPublicConfig() {
-            try {
-                const response = await fetch(API_BASE + '/config');
-                if (!response.ok) return;
-                const data = await response.json();
-
-                // Inscription fermée (pilote) : on masque le bouton de création.
-                if (data.allow_registration === false) {
-                    registerBtn.classList.add('hidden');
-                }
-            } catch (err) {
-                // En cas d'échec on laisse le bouton visible : le backend
-                // refusera de toute façon si l'inscription est fermée.
-                console.error('Configuration publique indisponible:', err);
-            }
-        }
-
-        async function bootstrap() {
-            await loadPublicConfig();
-
-            if (currentLang) {
-                applyLang();
-                langPanel.classList.add('hidden');
-                initAfterLang();
-                return;
-            }
-
-            // Aucune langue choisie : on affiche l'écran de sélection.
-            authPanel.classList.add('hidden');
-            chatWindow.classList.add('hidden');
-            footer.classList.add('hidden');
-            userBar.classList.add('hidden');
-            langBackBtn.classList.add('hidden');
-            langPanel.classList.remove('hidden');
-        }
-
-        bootstrap();
-    </script>
+    <script src="app.js" defer></script>
 </body>
 </html>

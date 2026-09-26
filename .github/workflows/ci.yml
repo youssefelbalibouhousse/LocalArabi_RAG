@@ -1,9 +1,10 @@
 # Intégration Continue (CI) — exécutée à chaque push et à chaque Pull Request.
 #
-# Trois garde-fous indépendants :
-#   1. lint   : le code respecte les règles de qualité (ruff)
-#   2. tests  : les 105 tests passent
-#   3. docker : l'image de production se construit toujours
+# Quatre garde-fous indépendants :
+#   1. lint   : le code Python respecte les règles de qualité (ruff)
+#   2. tests  : la suite de tests passe
+#   3. styles : la feuille de styles du frontend se compile
+#   4. docker : l'image de production se construit toujours
 #
 # Si un seul échoue, la Pull Request ne peut pas être fusionnée.
 
@@ -64,7 +65,33 @@ jobs:
         # en mémoire et simulent le RAG (pas d'appel à Ollama ni à ChromaDB).
         run: pytest --cov=app --cov=scripts --cov-report=term-missing
 
-  # --- 3. Construction de l'image de production ---------------------------
+  # --- 3. Feuille de styles du frontend ------------------------------------
+  styles:
+    name: Feuille de styles (Tailwind)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Met en cache les paquets npm : CI nettement plus rapide ensuite.
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Compiler la feuille
+        run: npm run build:css
+
+      - name: Vérifier que la feuille est produite
+        # La feuille compilée n'est PAS versionnée : sans cette vérification,
+        # le frontend pourrait être servi sans le moindre style en production.
+        run: test -s frontend/app.css
+
+  # --- 4. Construction de l'image de production ---------------------------
   docker:
     name: Construction de l'image Docker
     runs-on: ubuntu-latest

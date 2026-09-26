@@ -12,17 +12,30 @@ Chaque réponse cite ses sources : fichier, page et intervalle de lignes.
 app/
 ├── config.py        # Configuration centralisée (chemins, modèles, URL)
 ├── rag.py           # Logique RAG : récupération + génération
-└── main.py          # API FastAPI (route /ask)
+├── language.py      # Détection arabe/français (respect de la langue)
+├── auth.py          # JWT + hachage des mots de passe
+├── ratelimit.py     # Limitation de débit (fenêtre glissante)
+└── main.py          # API FastAPI (routes)
+frontend/
+├── index.html       # Balisage
+├── app.js           # Logique du client
+├── css/input.css    # SOURCE de la feuille de styles — à modifier
+└── app.css          # Feuille COMPILÉE (non versionnée)
 scripts/
-└── build_kb.py      # Ingestion des PDF → base vectorielle
+├── build_kb.py          # Ingestion des PDF → base vectorielle
+├── backup.py            # Sauvegarde + vérification + restauration
+├── schedule_backup.py   # Sauvegarde quotidienne automatique
+└── create_user.py       # Création d'un compte en ligne de commande
+tests/               # Suite pytest
 data/documents/      # Déposer ici les PDF à indexer
-frontend/index.html  # Interface web simple
 chroma_db/           # Base vectorielle générée (non versionnée)
 ```
 
 ## Prérequis
 
 - Python 3.10+
+- **Node.js 20+** — uniquement pour compiler la feuille de styles du frontend
+  (l'application elle-même reste 100 % Python à l'exécution)
 - [Ollama](https://ollama.com/) installé et lancé, avec les modèles nécessaires :
   ```bash
   ollama pull bge-m3
@@ -35,9 +48,20 @@ chroma_db/           # Base vectorielle générée (non versionnée)
 python -m venv venv
 venv/Scripts/activate          # Windows
 pip install -r requirements.txt
+
+npm install                    # outils de compilation de la feuille de styles
+npm run build:css              # produit frontend/app.css
 ```
 
 Optionnel : copier `.env.example` en `.env` pour surcharger la configuration.
+
+> 💡 `frontend/app.css` est un **artefact de build**, au même titre qu'un `.pyc` :
+> il n'est **pas versionné**. La source est `frontend/css/input.css`. Après toute
+> modification du balisage ou de la feuille, relancez `npm run build:css`
+> (ou `npm run watch:css` pendant le développement).
+>
+> En Docker, rien à installer : l'image compile la feuille elle-même
+> (build multi-étapes, Node n'existe que le temps de la compilation).
 
 ## Utilisation
 
@@ -105,6 +129,17 @@ python scripts/backup.py --restore <archive> --dry-run   # vérifie sans écrire
 python scripts/backup.py --restore <archive>  # restaure
 ```
 
+Automatiser (tâche quotidienne, **idempotente**) :
+
+```bash
+python scripts/schedule_backup.py              # montre le plan, ne modifie rien
+python scripts/schedule_backup.py --install    # installe la tâche quotidienne
+python scripts/schedule_backup.py --status     # est-elle active ?
+```
+
+Chaque exécution automatique utilise `--verify --log` : l'archive est vérifiée
+dès sa création, et le déroulement est écrit dans `backups/backup.log`.
+
 Sauvegardé : comptes (`data/app.db`), PDF sources, `.env` (clé JWT) et base
 vectorielle. Les connexions SQLite vivantes sont copiées via l'**API de
 sauvegarde de SQLite** (instantané cohérent) et non par simple copie de
@@ -118,7 +153,7 @@ volume `caddy_data`, automatisation par cron).
 ```bash
 pip install -r requirements-dev.txt   # dépendances de développement (une fois)
 
-pytest                                # suite de tests (~138 tests)
+pytest                                # la suite de tests complète
 pytest --cov=app --cov=scripts        # avec la couverture de code
 ruff check .                          # analyse statique
 ```

@@ -188,11 +188,44 @@ docker run --rm -v fastapiproject_caddy_data:/data -v "$PWD/backups":/backup \
 `BACKUP_RETENTION` (défaut : `7`) fixe le nombre d'archives conservées ; les
 plus anciennes sont supprimées automatiquement après chaque sauvegarde.
 
-Pour automatiser tous les jours à 3 h du matin sur un serveur Linux :
+Pour automatiser la sauvegarde, une seule commande suffit — et elle est
+**idempotente** : la relancer remplace la tâche au lieu d'en créer une seconde.
 
 ```bash
-# crontab -e
-0 3 * * * cd /srv/app && docker compose exec -T api python scripts/backup.py >> backups/cron.log 2>&1
+# SUR LE SERVEUR : l'application tourne dans Docker, donc --mode docker
+python3 scripts/schedule_backup.py --mode docker           # plan, ne modifie RIEN
+python3 scripts/schedule_backup.py --mode docker --install
+python3 scripts/schedule_backup.py --status                # est-ce actif ?
+
+# Sur un poste de développement (venv local)
+python scripts/schedule_backup.py --install
+```
+
+Le planificateur utilisé dépend du système :
+
+| Système | Outil | Idempotence |
+|---|---|---|
+| Linux / macOS | `crontab` | ligne repérée par un **marqueur** (`# arabic-rag-backup`) |
+| Windows | Planificateur de tâches | option `/F` (écrase l'existante) |
+
+Chaque exécution lance `scripts/backup.py --verify --log` :
+
+- **`--verify`** : l'archive est vérifiée (empreintes SHA-256) aussitôt créée ;
+- **`--log`** : le déroulement et le **code de sortie** sont écrits dans
+  `backups/backup.log`. Le planificateur ne conserve pas la sortie standard :
+  sans journal, une sauvegarde qui échoue échoue **en silence**.
+
+> 🔒 **Pourquoi l'idempotence est vitale** : deux tâches concurrentes
+> sauvegarderaient en parallèle, donc liraient la même base SQLite au même
+> moment. Le marqueur (cron) et l'option `/F` (Windows) l'empêchent.
+
+**Vérifier que la sauvegarde tourne réellement** — une tâche *planifiée* n'est
+pas une tâche *exécutée* :
+
+```bash
+python scripts/schedule_backup.py --status
+tail -n 20 backups/backup.log
+python scripts/backup.py --list        # une archive par jour est attendue
 ```
 
 > 🏆 **La règle d'or : une sauvegarde jamais restaurée n'existe pas.**
@@ -204,6 +237,42 @@ Pour automatiser tous les jours à 3 h du matin sur un serveur Linux :
 Trois copies, sur deux supports différents, dont **une hors site**. Un disque
 externe, un NAS distant ou un stockage objet (`rclone`, `scp`, Backblaze B2…)
 couvrent le dernier « 1 » — le seul qui sauve lors d'un vrai sinistre.
+
+## Modifier l'apparence du frontend
+
+Le frontend est stylé par une feuille **compilée** (`frontend/app.css`), qui
+n'est pas versionnée : on modifie la source, puis on compile.
+
+```bash
+npm install            # une seule fois
+npm run build:css      # compile frontend/css/input.css -> frontend/app.css
+npm run watch:css      # recompile automatiquement à chaque modification
+```
+
+| Fichier | Rôle |
+|---|---|
+| `frontend/css/input.css` | **La source** : jetons de design, typographie, composants |
+| `frontend/index.html` | Le balisage (classes sémantiques) |
+| `frontend/app.js` | La logique du client |
+| `frontend/app.css` | **Compilé** — ne jamais le modifier à la main |
+
+> ⚠️ **Ne jamais éditer `frontend/app.css`** : il est écrasé à chaque
+> compilation. Toute modification manuelle est perdue au build suivant.
+
+En Docker, la compilation est intégrée : l'image utilise un **build
+multi-étapes** (Node n'existe que dans la première étape, jamais dans l'image
+finale). `docker compose up --build` suffit donc — rien à installer sur le
+serveur.
+
+### Deux invariants à ne pas casser
+
+1. **Jamais de `letter-spacing` sur de l'arabe.** L'espacement casse la liaison
+   des lettres (الحروف المتصلة) : « محمد » devient « م ح م د ». Une seule ligne
+   de CSS peut rendre le texte illisible.
+2. **Jamais d'`@import "tailwindcss"` sans `source(none)`.** Sinon Tailwind
+   scanne tout le dossier du projet et le build local ne produit plus le même
+   fichier que le build Docker (20,7 Ko contre 13,3 Ko mesurés) — une classe
+   pouvait fonctionner en développement puis manquer en production.
 
 ## Première installation des modèles (une seule fois)
 
