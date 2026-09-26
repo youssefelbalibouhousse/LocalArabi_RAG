@@ -186,6 +186,40 @@ def test_ask_repond_avec_sources_et_extraits(client, auth_headers, monkeypatch):
     assert corps["context_used"] == ["Le texte de la source."]
 
 
+def test_ask_relance_le_modele_si_la_langue_n_est_pas_respectee(
+    client, auth_headers, monkeypatch
+):
+    """Bout en bout : le modèle répond en arabe alors que « fr » est demandé.
+
+    Le contexte est en arabe (comme dans la réalité), ce qui pousse le modèle à
+    répondre en arabe. L'API doit détecter la langue et faire réécrire.
+    """
+    monkeypatch.setattr(rag, "get_collection", lambda: "collection-simulee")
+    monkeypatch.setattr(
+        rag,
+        "retrieve",
+        lambda collection, question, n_results=None: (
+            ["نص المصدر المستخرج من الوثيقة."],
+            [{"source": "a.pdf", "page": 1, "line_start": 1, "line_end": 2}],
+        ),
+    )
+
+    reponses = ["هذه إجابة بالعربية عن السؤال.", "Voici la réponse en français."]
+    monkeypatch.setattr(rag, "generate", lambda *args, **kwargs: reponses.pop(0))
+
+    response = client.get(
+        "/ask",
+        params={"question": "une question", "language": "fr"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    corps = response.json()
+    assert corps["language"] == "fr"
+    assert "Voici la réponse en français." in corps["answer"]
+    assert "هذه إجابة" not in corps["answer"]
+
+
 def test_ask_repond_en_arabe_par_defaut(client, auth_headers, monkeypatch):
     monkeypatch.setattr(rag, "get_collection", lambda: "collection-simulee")
     monkeypatch.setattr(rag, "retrieve", lambda collection, question, n_results=None: ([], []))

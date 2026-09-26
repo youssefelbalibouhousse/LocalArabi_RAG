@@ -194,3 +194,197 @@ def test_generate_renvoie_une_chaine_meme_si_le_cloud_repond_vide(monkeypatch):
     monkeypatch.setattr(rag, "get_openai_client", lambda: faux)
 
     assert rag.generate("question", "contexte", "fr") == ""
+
+
+# --- Placement de la consigne de langue dans l'invite ---------------------
+
+def test_build_prompt_place_la_consigne_de_langue_apres_le_contexte():
+    """Les derniers tokens pèsent le plus : la consigne doit venir EN DERNIER.
+
+    C'est la correction de la cause n°1 du bug : placée au début, avant un long
+    contexte arabe, la consigne « en français » était noyée.
+    """
+    prompt = rag.build_prompt("Quelle règle ?", "المحتوى المستخرج", "fr")
+
+    assert prompt.index("Consigne de langue") > prompt.index("Contexte extrait")
+    assert prompt.index("Consigne de langue") > prompt.index("Quelle règle ?")
+
+
+def test_build_prompt_francais_previent_que_le_contexte_est_en_arabe():
+    """Sans cet avertissement, le modèle « continue » dans la langue du contexte."""
+    prompt = rag.build_prompt("Question ?", "المحتوى", "fr")
+
+    assert "en arabe" in prompt
+    assert "UNIQUEMENT EN FRANÇAIS" in prompt
+
+
+def test_build_prompt_arabe_place_la_consigne_a_la_fin():
+    prompt = rag.build_prompt("ما الحكم؟", "contexte latin", "ar")
+
+    assert prompt.index("تنبيه إلزامي") > prompt.index("السياق المستخرج")
+    assert prompt.index("تنبيه إلزامي") > prompt.index("ما الحكم؟")
+
+
+def test_build_repair_instruction_est_bilingue():
+    assert "FRANÇAIS" in rag.build_repair_instruction("fr")
+    assert "باللغة العربية" in rag.build_repair_instruction("ar")
+
+
+def test_build_messages_initial_ne_contient_qu_un_message():
+    messages = rag.build_messages("Question ?", "contexte", "fr")
+
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+
+
+def test_build_messages_de_reprise_forme_un_tour_de_correction():
+    """La réponse fautive est renvoyée au modèle : il voit quoi corriger."""
+    messages = rag.build_messages("Question ?", "contexte", "fr", previous_answer="إجابة")
+
+    assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+    assert messages[1]["content"] == "إجابة"
+    assert "PAS EN FRANÇAIS" in messages[2]["content"]
+
+
+# --- Vérification et reprise (answer_question) ---------------------------
+
+REPONSE_FR = "Voici la réponse en français, d'après les documents."
+REPONSE_AR = "هذه هي الإجابة بالعربية حسب الوثائق المرفقة."
+# Concaténation volontaire : ruff refuse (RUF001) les littéraux qui mélangent
+# les alphabets — or ici, le mélange est précisément le cas à couvrir.
+REPONSE_MELANGEE = "abcde" + "المدرسة"
+
+
+def _fausse_generation(*reponses):
+    """Doublure de `rag.generate`.
+
+    Renvoie les réponses dans l'ordre, puis la dernière indéfiniment (ce qui
+    simule un modèle qui « persiste » dans son erreur), et journalise chaque
+    appel pour pouvoir les compter.
+    """
+    attente = list(reponses)
+    appels = []
+
+    def faux_generate(question, context, language="ar", previous_answer=None):
+        appels.append({
+            "question": question,
+            "context": context,
+            "language": language,
+            "previous_answer": previous_answer,
+        })
+        return attente.pop(0) if len(attente) > 1 else attente[0]
+
+    return faux_generate, appels
+
+
+def test_answer_question_ne_relance_pas_si_la_langue_est_bonne(monkeypatch):
+    """Le cas normal ne doit coûter qu'UN appel au modèle."""
+    faux, appels = _fausse_generation(REPONSE_FR)
+    monkeypatch.setattr(rag, "generate", faux)
+
+    resultat = rag.answer_question("Question ?", "contexte", "fr")
+
+    assert resultat == REPONSE_FR
+    assert len(appels) == 1
+    assert appels[0]["previous_answer"] is None
+
+
+def test_answer_question_relance_quand_la_langue_est_fausse(monkeypatch):
+    """C'est LE bug corrigé : le modèle répond en arabe malgré language="fr"."""
+    faux, appels = _fausse_generation(REPONSE_AR, REPONSE_FR)
+    monkeypatch.setattr(rag, "generate", faux)
+
+    resultat = rag.answer_question("Question ?", "contexte", "fr")
+
+    assert resultat == REPONSE_FR
+    assert len(appels) == 2
+    # La reprise doit transmettre la réponse fautive (tour de correction).
+    assert appels[1]["previous_answer"] == REPONSE_AR
+    assert appels[1]["language"] == "fr"
+
+
+def test_answer_question_fonctionne_aussi_dans_l_autre_sens(monkeypatch):
+    """Symétrie : un modèle qui répond en français quand on demande l'arabe."""
+    faux, appels = _fausse_generation(REPONSE_FR, REPONSE_AR)
+    monkeypatch.setattr(rag, "generate", faux)
+
+    assert rag.answer_question("Question ?", "contexte", "ar") == REPONSE_AR
+    assert len(appels) == 2
+
+
+def test_answer_question_renvoie_la_derniere_tentative_si_rien_ne_marche(monkeypatch):
+    """Le modèle persiste dans l'erreur : on rend la dernière réponse obtenue.
+
+    Mieux vaut une réponse imparfaite qu'aucune réponse du tout — et le
+    problème est signalé dans les journaux (voir le `logger.warning`).
+    """
+    faux, appels = _fausse_generation(REPONSE_AR)
+    monkeypatch.setattr(rag, "generate", faux)
+
+    resultat = rag.answer_question("Question ?", "contexte", "fr")
+
+    assert resultat == REPONSE_AR
+    assert len(appels) == 2  # 1 appel initial + 1 reprise (défaut)
+
+
+def test_answer_question_respecte_le_nombre_maximal_de_reprises(monkeypatch):
+    """Chaque reprise coûte un appel LLM : le plafond doit être respecté."""
+    faux, appels = _fausse_generation(REPONSE_AR)
+    monkeypatch.setattr(rag, "generate", faux)
+    monkeypatch.setattr(config, "LANGUAGE_MAX_RETRIES", 3)
+
+    rag.answer_question("Question ?", "contexte", "fr")
+
+    assert len(appels) == 4  # 1 + 3
+
+
+def test_answer_question_sans_reprise_si_le_plafond_est_zero(monkeypatch):
+    faux, appels = _fausse_generation(REPONSE_AR)
+    monkeypatch.setattr(rag, "generate", faux)
+    monkeypatch.setattr(config, "LANGUAGE_MAX_RETRIES", 0)
+
+    assert rag.answer_question("Question ?", "contexte", "fr") == REPONSE_AR
+    assert len(appels) == 1
+
+
+def test_answer_question_accepte_une_langue_indeterminee(monkeypatch):
+    """« Je ne sais pas quelle langue c'est » n'est pas « c'est faux ».
+
+    Relancer sur une réponse ambiguë gaspillerait un appel GPU sans preuve
+    qu'il y ait quoi que ce soit à corriger.
+    """
+    faux, appels = _fausse_generation(REPONSE_MELANGEE)
+    monkeypatch.setattr(rag, "generate", faux)
+
+    resultat = rag.answer_question("Question ?", "contexte", "fr")
+
+    assert resultat == REPONSE_MELANGEE
+    assert len(appels) == 1
+
+
+def test_answer_question_accepte_une_reprise_devenue_ambigue(monkeypatch):
+    """Après reprise, une réponse mélangée est acceptée (plus rien n'est prouvable)."""
+    faux, appels = _fausse_generation(REPONSE_AR, REPONSE_MELANGEE)
+    monkeypatch.setattr(rag, "generate", faux)
+
+    assert rag.answer_question("Question ?", "contexte", "fr") == REPONSE_MELANGEE
+    assert len(appels) == 2
+
+
+def test_answer_question_garde_la_premiere_reponse_si_la_reprise_est_vide(monkeypatch):
+    """Une reprise vide ne doit pas effacer une réponse, même imparfaite."""
+    faux, appels = _fausse_generation(REPONSE_AR, "   ")
+    monkeypatch.setattr(rag, "generate", faux)
+
+    assert rag.answer_question("Question ?", "contexte", "fr") == REPONSE_AR
+    assert len(appels) == 2
+
+
+def test_answer_question_sans_verification_si_desactivee(monkeypatch):
+    """Interrupteur de secours : utile pour diagnostiquer ou maîtriser la facture."""
+    faux, appels = _fausse_generation(REPONSE_AR)
+    monkeypatch.setattr(rag, "generate", faux)
+    monkeypatch.setattr(config, "LANGUAGE_ENFORCEMENT_ENABLED", False)
+
+    assert rag.answer_question("Question ?", "contexte", "fr") == REPONSE_AR
+    assert len(appels) == 1

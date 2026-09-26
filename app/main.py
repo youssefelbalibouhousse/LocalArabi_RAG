@@ -227,8 +227,11 @@ def ask(
 
     context = "\n\n".join(docs)
 
-    # 2. GENERATE — réponse basée uniquement sur le contexte, dans la langue demandée
-    answer = rag.generate(question, context, language)
+    # 2. GENERATE — réponse basée uniquement sur le contexte, dans la langue demandée.
+    # `answer_question` (et non `generate`) : elle vérifie en plus que la langue
+    # RÉELLEMENT produite correspond à celle demandée, et demande une réécriture
+    # sinon. Voir la défense en profondeur décrite dans app/rag.py.
+    answer = rag.answer_question(question, context, language)
 
     # 3. Ajoute la mention des sources à la réponse
     if sources:

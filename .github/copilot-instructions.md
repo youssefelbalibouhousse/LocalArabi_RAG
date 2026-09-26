@@ -77,6 +77,11 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   même base SQLite en parallèle. La tâche planifiée utilise toujours `--verify --log`.
   Dans `backup.py`, ne pas retirer `--log` d'un contexte planifié : le planificateur ne
   conserve pas la sortie standard, donc un échec deviendrait invisible.
+- **Langue de la réponse** : toute route interrogeant le modèle doit passer par
+  `rag.answer_question()` et **jamais** par `rag.generate()` : c'est là que la langue
+  réellement produite est vérifiée (`app/language.py`) puis corrigée. Dans
+  `build_prompt`, la consigne de langue doit rester **en fin d'invite** — c'est
+  volontaire (les derniers tokens pèsent le plus), ne pas la remonter au début.
 - **Frontend** : le style vit dans `frontend/css/input.css` ; `frontend/app.css` est un
   artefact **compilé** (non versionné, écrasé à chaque build) — ne jamais l'éditer à la
   main. `@import "tailwindcss" source(none)` est indispensable : sans lui, Tailwind

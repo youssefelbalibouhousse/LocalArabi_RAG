@@ -191,3 +191,29 @@ def sqlite_database_path() -> Path | None:
 
     chemin = DATABASE_URL[len(prefix):]
     return Path(chemin) if chemin else None
+
+
+# --- Respect de la langue de la réponse -----------------------------------
+# Le modèle suit imparfaitement la consigne de langue, surtout quand les
+# extraits fournis sont en arabe : il « continue » dans la langue du contexte.
+# Deux protections complémentaires, à des niveaux différents (défense en
+# profondeur) :
+#   1. l'invite place la consigne de langue EN FIN de texte (voir build_prompt) ;
+#   2. la langue RÉELLEMENT produite est vérifiée, et une réécriture est
+#      demandée si elle est fausse (voir rag.answer_question).
+#
+# Le contrôle est déterministe (comptage d'alphabet, voir app/language.py) :
+# il ne dépend pas du bon vouloir du modèle.
+
+# Désactiver la vérification (utile pour diagnostiquer ou maîtriser la facture :
+# chaque reprise est un appel LLM supplémentaire).
+LANGUAGE_ENFORCEMENT_ENABLED = _env_flag("LANGUAGE_ENFORCEMENT_ENABLED", True)
+
+# Nombre maximum de réécritures demandées pour une seule question.
+# 0 = on constate le problème dans les journaux, sans relancer le modèle.
+LANGUAGE_MAX_RETRIES = int(os.getenv("LANGUAGE_MAX_RETRIES", "1"))
+
+if LANGUAGE_MAX_RETRIES < 0:
+    raise ValueError(
+        f"LANGUAGE_MAX_RETRIES={LANGUAGE_MAX_RETRIES} est invalide : la valeur doit être >= 0."
+    )
