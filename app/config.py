@@ -88,6 +88,19 @@ LLM_MODEL = os.getenv("LLM_MODEL", "llama3.1")
 N_RESULTS = int(os.getenv("N_RESULTS", "5"))
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "600"))
 
+# Ingestion : nombre de chunks écrits par appel à ChromaDB.
+#
+# Deux plafonds à respecter, d'où une valeur volontairement modeste :
+#   · ChromaDB refuse les écritures de plus de quelques milliers d'éléments ;
+#   · un lot trop gros dépasse le délai d'expiration du serveur d'embeddings.
+# Augmenter accélère l'ingestion massive ; diminuer rend la reprise plus fine.
+INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "256"))
+
+if INGEST_BATCH_SIZE < 1:
+    raise ValueError(
+        f"INGEST_BATCH_SIZE={INGEST_BATCH_SIZE} est invalide : la valeur doit être >= 1."
+    )
+
 # Seuil de pertinence : distance maximale acceptée pour un chunk renvoyé par
 # ChromaDB (métrique de distance L2). Une valeur <= 0 désactive le filtrage
 # (comportement par défaut, sans risque de casser le chatbot si les distances
