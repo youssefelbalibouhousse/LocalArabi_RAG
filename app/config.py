@@ -50,8 +50,19 @@ def _parse_rate_limit(name: str, default: tuple[int, int]) -> tuple[int, int]:
 
     return maximum, fenetre
 
-# Emplacements
-DOCUMENTS_DIR = BASE_DIR / "data" / "documents"
+# --- Emplacements ---------------------------------------------------------
+# Le corpus est rangé en DEUX dossiers, et ce n'est pas un détail de rangement :
+#   · `documents/` — corpus de démonstration, versionné donc public ;
+#   · `shamela/`   — EPUB de shamela.ws, IGNORÉ par Git. Le texte y est
+#     numérique et propre, mais les éditions modernes restent sous droits
+#     d'éditeurs tiers : elles ne doivent jamais être poussées (voir .gitignore).
+# L'ingestion traite les deux de la même façon — le dossier n'est qu'un rangement.
+DOCUMENTS_DIR = Path(os.getenv("DOCUMENTS_DIR", BASE_DIR / "data" / "documents"))
+SHAMELA_DIR = Path(os.getenv("SHAMELA_DIR", BASE_DIR / "data" / "shamela"))
+
+# Dossiers parcourus par l'ingestion, dans cet ordre.
+CORPUS_DIRS = (DOCUMENTS_DIR, SHAMELA_DIR)
+
 CHROMA_DB_PATH = str(BASE_DIR / "chroma_db")
 FRONTEND_DIR = BASE_DIR / "frontend"
 
@@ -90,15 +101,38 @@ CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "600"))
 
 # Ingestion : nombre de chunks écrits par appel à ChromaDB.
 #
-# Deux plafonds à respecter, d'où une valeur volontairement modeste :
-#   · ChromaDB refuse les écritures de plus de quelques milliers d'éléments ;
-#   · un lot trop gros dépasse le délai d'expiration du serveur d'embeddings.
-# Augmenter accélère l'ingestion massive ; diminuer rend la reprise plus fine.
-INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "256"))
+# Cette valeur n'est pas libre : elle se lit CONJOINTEMENT avec
+# `EMBEDDING_TIMEOUT`, parce qu'un lot est embarqué en UNE SEULE requête.
+# Le serveur d'embeddings est ici le facteur limitant, et de loin.
+#
+# Mesuré sur ce projet (bge-m3, chunks de ~520 caractères) : ~0,55 s par
+# chunk. D'où :
+#     32 chunks ≈  18 s   (6 fois sous le délai de 120 s)
+#    256 chunks ≈ 140 s   (DÉPASSE le délai — l'écriture échoue)
+# La valeur 256 a réellement échoué en production locale : ChromaDB annonçait
+# « timed out in add », le client attendant 60 s par défaut.
+#
+# La règle : garder « INGEST_BATCH_SIZE × 0,6 s » très en dessous de
+# EMBEDDING_TIMEOUT. Un lot plus petit coûte quelques requêtes de plus, mais
+# rend la reprise plus fine — c'est le bon compromis.
+INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "32"))
 
 if INGEST_BATCH_SIZE < 1:
     raise ValueError(
         f"INGEST_BATCH_SIZE={INGEST_BATCH_SIZE} est invalide : la valeur doit être >= 1."
+    )
+
+# Délai d'expiration d'un appel d'embedding, en secondes.
+#
+# Le défaut de la bibliothèque ChromaDB est de 60 s — trop court dès qu'un lot
+# contient quelques centaines de chunks. Le délai s'applique aussi bien à un
+# lot d'ingestion qu'à l'embedding d'une seule question : il doit donc rester
+# borné, d'où une valeur généreuse mais pas infinie.
+EMBEDDING_TIMEOUT = int(os.getenv("EMBEDDING_TIMEOUT", "120"))
+
+if EMBEDDING_TIMEOUT < 1:
+    raise ValueError(
+        f"EMBEDDING_TIMEOUT={EMBEDDING_TIMEOUT} est invalide : la valeur doit être >= 1."
     )
 
 # Seuil de pertinence : distance maximale acceptée pour un chunk renvoyé par

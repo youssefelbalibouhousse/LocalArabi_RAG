@@ -27,10 +27,17 @@ _openai_client = None
 
 
 def get_embedding_function():
-    """Fonction d'embedding bge-m3 servie par Ollama."""
+    """Fonction d'embedding bge-m3 servie par Ollama.
+
+    Le délai d'expiration est passé EXPLICITEMENT : celui de la bibliothèque
+    (60 s) est trop court pour un lot d'ingestion complet, et l'écriture
+    échouait alors sur un « timed out in add » difficile à relier à sa cause.
+    Voir `config.EMBEDDING_TIMEOUT`.
+    """
     return OllamaEmbeddingFunction(
         model_name=config.EMBEDDING_MODEL,
         url=config.OLLAMA_URL,
+        timeout=config.EMBEDDING_TIMEOUT,
     )
 
 
