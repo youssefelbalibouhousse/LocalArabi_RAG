@@ -56,9 +56,17 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   lui-même. Pour joindre un autre service, utiliser son **nom de service**
   (`ollama`) et toujours passer par `config.OLLAMA_URL`. Ne jamais coder
   `localhost` en dur dans un appel réseau.
-- **`build_kb.py` est destructif** : il supprime puis recrée la collection. La
-  vérification `check_ollama()` et l'extraction des PDF se font **avant** la
-  suppression — préserver cet ordre, sinon une base vide est laissée derrière.
+- **`build_kb.py` est incrémental et NON destructif** : il ne supprime jamais la
+  collection. Chaque document est remplacé individuellement
+  (`where={"source": ...}`). L'ordre des opérations dans `app/ingest.py` est une
+  **garantie de reprise** et n'est pas interchangeable : *effacer le registre →
+  supprimer les chunks → écrire → inscrire le registre*. Inscrire **avant**
+  d'écrire laisserait un registre affirmant qu'un document est indexé alors qu'il
+  ne l'est plus — et il ne serait plus jamais repris. `check_ollama()` reste
+  **avant** toute écriture.
+- **Un seul modèle d'embedding par index** : `ensure_embedding_model()` inscrit le
+  modèle dans les métadonnées de la collection et **refuse** tout écart. Sans ce
+  refus, changer `EMBEDDING_MODEL` produirait des résultats faux en silence.
 - **Diagnostic « pas d'informations »** : une réponse sans la mention des sources
   (`📄 Sources` / `📄 المصادر`) signifie que la base vectorielle est **vide**, pas
   que le modèle a échoué. Avec la mention des sources, c'est le modèle qui juge

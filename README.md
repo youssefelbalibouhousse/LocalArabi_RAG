@@ -12,6 +12,7 @@ Chaque réponse cite ses sources : fichier, page et intervalle de lignes.
 app/
 ├── config.py        # Configuration centralisée (chemins, modèles, URL)
 ├── rag.py           # Logique RAG : récupération + génération
+├── ingest.py        # Ingestion incrémentale et bornée (registre, lots)
 ├── evaluation.py    # Mesure de la qualité de la récupération (hit@k, MRR)
 ├── language.py      # Détection arabe/français (respect de la langue)
 ├── auth.py          # JWT + hachage des mots de passe
@@ -71,11 +72,17 @@ Optionnel : copier `.env.example` en `.env` pour surcharger la configuration.
 ## Utilisation
 
 1. **Déposer les PDF** dans `data/documents/`.
-2. **Construire la base vectorielle** :
+2. **Mettre à jour la base vectorielle** :
    ```bash
-   python scripts/build_kb.py
+   python scripts/build_kb.py                 # n'ingère que ce qui a changé
+   python scripts/build_kb.py --status        # registre face à l'index
+   python scripts/build_kb.py --force         # tout ré-ingérer
+   python scripts/build_kb.py --only x.pdf    # un seul document
    ```
-   (à relancer à chaque ajout/modification de document)
+   L'ingestion est **incrémentale** : un document dont le contenu n'a pas changé
+   est ignoré (comparaison d'empreintes SHA-256, jamais de dates). Elle est aussi
+   **non destructive** : seule la part d'un document est remplacée, jamais toute
+   la collection.
 3. **Lancer l'API** :
    ```bash
    uvicorn app.main:app --reload
@@ -225,6 +232,7 @@ non de la qualité de la récupération.
 | Sujet | Décision |
 |---|---|
 | Configuration | `app/config.py` est la **source unique de vérité**, surchargeable par variables d'environnement |
+| Ingestion | **Incrémentale et non destructive** : empreinte SHA-256 du contenu, remplacement par document, écriture par lots bornés. Registre dans `data/app.db`. Un index refuse de mélanger deux modèles d'embedding. |
 | Fournisseur LLM | `LLM_PROVIDER=ollama` (auto-hébergé) ou `openai` (Groq, Together, vLLM…) |
 | Inscription | Ouverte en développement, **fermée par défaut en production** |
 | Clé JWT | Minimum 32 octets (RFC 7518) ; l'application refuse de démarrer en production avec la clé de développement |

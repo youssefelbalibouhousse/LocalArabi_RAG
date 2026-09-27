@@ -1,22 +1,30 @@
-"""Ingestion : lit tous les PDF de data/documents/ et (re)construit la base vectorielle.
+"""Ingestion : met à jour la base vectorielle à partir des PDF de data/documents/.
 
 Usage :
-    python scripts/build_kb.py
+    python scripts/build_kb.py                  # ingère ce qui a changé
+    python scripts/build_kb.py --force          # ré-ingère tout
+    python scripts/build_kb.py --only doc.pdf   # un seul document
+    python scripts/build_kb.py --status         # état registre/index, sans écrire
+
+⚠️ Ce script est INCRÉMENTAL et NON DESTRUCTIF : il ne supprime plus la
+collection entière. Un document dont le contenu n'a pas changé est ignoré
+(comparaison d'empreintes SHA-256, jamais de dates de modification).
 """
 
+import argparse
 import sys
 from pathlib import Path
 
 from pypdf import PdfReader
+from sqlmodel import Session
 
 # Permet d'exécuter le script directement (python scripts/build_kb.py)
 # en rendant le package `app` importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import chromadb
-
-from app import config
-from app.rag import get_embedding_function, get_ollama_client
+from app import config, ingest, rag
+from app.database import create_db_and_tables, engine
+from app.rag import get_ollama_client
 
 
 def extract_arabic_pdf(pdf_path):
@@ -94,64 +102,162 @@ def check_ollama():
         return False
 
 
-def main():
+# --- Ingestion -----------------------------------------------------------
+
+def ingerer_un_pdf(session, collection, pdf_path: Path, args) -> ingest.IngestResult:
+    """Extrait, découpe et ingère un PDF, en ne refaisant que le nécessaire."""
+    empreinte = ingest.fingerprint_file(pdf_path)
+
+    # Court-circuit AVANT l'extraction. La même comparaison existe dans
+    # `ingest_document`, mais elle arrive trop tard : il aurait fallu relire
+    # tout le PDF pour s'apercevoir qu'il n'avait pas changé. C'est exactement
+    # ce que l'empreinte permet d'éviter.
+    if not args.force:
+        ligne = ingest.registre_pour(session, pdf_path.name)
+        if ligne is not None and ligne.fingerprint == empreinte:
+            return ingest.IngestResult(pdf_path.name, "unchanged", ligne.chunk_count, 0.0)
+
+    pages = extract_arabic_pdf(pdf_path)
+    if not pages:
+        print(f"⚠️  Aucun texte extractible dans {pdf_path.name}.")
+
+    return ingest.ingest_document(
+        session,
+        collection,
+        source=pdf_path.name,
+        fingerprint=empreinte,
+        chunks=chunk_pages(pages) if pages else [],
+        force=args.force,
+    )
+
+
+def afficher_resume(resultats) -> None:
+    """Récapitulatif d'un passage d'ingestion."""
+    comptes = {statut: 0 for statut in ("added", "updated", "unchanged", "empty")}
+    for resultat in resultats:
+        comptes[resultat.status] += 1
+
+    ecrits = sum(r.chunks for r in resultats if r.status in ("added", "updated"))
+
+    print()
+    print("-" * 64)
+    print(
+        f"  {comptes['added']} ajouté(s) · {comptes['updated']} mis à jour · "
+        f"{comptes['unchanged']} inchangé(s) · {comptes['empty']} vide(s)"
+    )
+    print(f"  {ecrits} chunk(s) écrit(s) au total")
+    print(f"  Index : {config.CHROMA_DB_PATH}  ·  collection « {config.COLLECTION_NAME} »")
+    print("-" * 64)
+
+
+def afficher_etat(pdf_paths, args) -> int:
+    """Montre le registre face à l'index, sans rien modifier.
+
+    L'écart entre les deux colonnes est LA chose à surveiller : un registre qui
+    annonce des chunks que l'index ne contient plus signale un `chroma_db/`
+    effacé ou remplacé — la base ne doit alors PAS être crue.
+    """
+    collection = rag.get_collection()
+
+    print(f"{'document':<32}{'registre':>9}{'index':>8}   modèle d'embedding")
+    print("-" * 76)
+
+    ecart = False
+    with Session(engine) as session:
+        for pdf_path in pdf_paths:
+            ligne = ingest.registre_pour(session, pdf_path.name)
+            attendu = ligne.chunk_count if ligne else 0
+            reel = ingest.compter_chunks(collection, pdf_path.name)
+            modele = ligne.embedding_model if ligne else "—"
+            marque = ""
+            if attendu != reel:
+                ecart = True
+                marque = "  ⚠️ écart"
+            print(f"{pdf_path.name:<32}{attendu:>9}{reel:>8}   {modele}{marque}")
+
+    print("-" * 76)
+    if ecart:
+        print("⚠️  Un écart signifie que `chroma_db/` ne correspond plus au registre.")
+        print("   Relancez avec --force pour reconstruire l'index de ces documents.")
+    else:
+        print("✅ Registre et index concordent.")
+    return 0
+
+
+def analyser_arguments() -> argparse.Namespace:
+    """Décrit la ligne de commande."""
+    analyseur = argparse.ArgumentParser(
+        description="Met à jour la base vectorielle à partir des PDF de data/documents/.",
+    )
+    analyseur.add_argument(
+        "--force",
+        action="store_true",
+        help="ré-ingère tout, même les documents inchangés",
+    )
+    analyseur.add_argument(
+        "--only",
+        metavar="FICHIER",
+        help="ne traiter qu'un seul document (nom de fichier, ex. cours.pdf)",
+    )
+    analyseur.add_argument(
+        "--status",
+        action="store_true",
+        help="affiche le registre et l'index, sans rien écrire",
+    )
+    return analyseur.parse_args()
+
+
+def main() -> int:
+    args = analyser_arguments()
+
     pdf_paths = sorted(config.DOCUMENTS_DIR.glob("*.pdf"))
+    if args.only:
+        pdf_paths = [chemin for chemin in pdf_paths if chemin.name == args.only]
+        if not pdf_paths:
+            print(f"❌ Aucun PDF nommé « {args.only} » dans {config.DOCUMENTS_DIR}")
+            return 1
+
     if not pdf_paths:
         print(f"❌ Aucun PDF trouvé dans {config.DOCUMENTS_DIR}")
-        return
+        return 1
 
-    # 1. Extraire et découper TOUS les PDF AVANT de toucher à la base.
-    #    Ainsi, si l'extraction échoue, la collection existante est préservée.
-    documents, ids, metadatas = [], [], []
+    create_db_and_tables()
 
-    for pdf_path in pdf_paths:
-        pages = extract_arabic_pdf(pdf_path)
-        if not pages:
-            print(f"⚠️  Aucun texte extractible dans {pdf_path.name}, ignoré.")
-            continue
+    if args.status:
+        return afficher_etat(pdf_paths, args)
 
-        chunks = chunk_pages(pages)
-        for i, chunk in enumerate(chunks):
-            documents.append(chunk["text"])
-            ids.append(f"{pdf_path.name}::chunk_{i}")
-            metadatas.append({
-                "source": pdf_path.name,
-                "page": chunk["page"],
-                "line_start": chunk["line_start"],
-                "line_end": chunk["line_end"],
-            })
-        print(f"  → {len(chunks)} chunks depuis {pdf_path.name}")
-
-    if not documents:
-        print("❌ Aucun chunk créé (PDF vides ?). La base existante n'a PAS été modifiée.")
-        return
-
-    # 2. Vérifier qu'Ollama est joignable AVANT de supprimer quoi que ce soit.
+    # Ollama AVANT de toucher à la base : sans lui, aucun embedding n'est
+    # calculable, et tout travail commencé serait perdu.
     if not check_ollama():
-        print("❌ Opération annulée : la base existante a été conservée.")
-        return
+        print("❌ Opération annulée : la base existante est intacte.")
+        return 1
 
-    # 3. Reconstruire la collection seulement maintenant (tout est prêt).
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    collection = rag.get_collection()
+    try:
+        ingest.ensure_embedding_model(collection)
+    except ingest.EmbeddingModelMismatch as erreur:
+        print(f"❌ {erreur}")
+        return 1
 
-    # On supprime l'ancienne collection si elle existe. Vérifier explicitement
-    # évite un try/except aveugle : supprimer une collection absente lèverait
-    # une exception, alors que c'est un cas parfaitement normal au 1er lancement.
-    noms_existants = {c.name for c in client.list_collections()}
-    if config.COLLECTION_NAME in noms_existants:
-        client.delete_collection(name=config.COLLECTION_NAME)
+    resultats = []
+    with Session(engine) as session:
+        for pdf_path in pdf_paths:
+            print(f"📄 {pdf_path.name} …", end=" ", flush=True)
+            try:
+                resultat = ingerer_un_pdf(session, collection, pdf_path, args)
+            except Exception as erreur:
+                print(f"❌ échec : {erreur}")
+                print(
+                    "   Le document n'est PAS inscrit au registre : il sera repris "
+                    "au prochain passage."
+                )
+                return 1
+            resultats.append(resultat)
+            print(resultat.libelle)
 
-    collection = client.create_collection(
-        name=config.COLLECTION_NAME,
-        embedding_function=get_embedding_function(),
-    )
-    collection.add(documents=documents, ids=ids, metadatas=metadatas)
-
-    print(f"\n🎉 Succès ! {len(documents)} chunks ajoutés dans ChromaDB.")
-    print(f"📦 Collection : {config.COLLECTION_NAME}")
-    print(f"📁 Base : {config.CHROMA_DB_PATH}")
-    print(f"📚 Documents : {[p.name for p in pdf_paths]}")
+    afficher_resume(resultats)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
