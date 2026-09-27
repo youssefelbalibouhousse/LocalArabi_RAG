@@ -1,10 +1,11 @@
 """Ingestion : met à jour la base vectorielle à partir des documents de data/.
 
 Usage :
-    python scripts/build_kb.py                  # ingère ce qui a changé
-    python scripts/build_kb.py --force          # ré-ingère tout
-    python scripts/build_kb.py --only doc.pdf   # un seul document
-    python scripts/build_kb.py --status         # état registre/index, sans écrire
+    python scripts/build_kb.py                    # ingère ce qui a changé
+    python scripts/build_kb.py --force            # ré-ingère tout
+    python scripts/build_kb.py --only doc.pdf     # un seul document
+    python scripts/build_kb.py --forget doc.pdf   # en RETIRER un (index + registre)
+    python scripts/build_kb.py --status           # état registre/index, sans écrire
 
 Deux formats, deux dossiers (voir `config.CORPUS_DIRS`) :
     · PDF  dans `data/documents/` — versionné, donc public ;
@@ -14,6 +15,10 @@ Le dossier n'est qu'un rangement : l'ingestion est identique.
 ⚠️ Ce script est INCRÉMENTAL et NON DESTRUCTIF : il ne supprime plus la
 collection entière. Un document dont le contenu n'a pas changé est ignoré
 (comparaison d'empreintes SHA-256, jamais de dates de modification).
+
+⚠️ Retirer un document est EXPLICITE (`--forget`) et jamais automatique : un
+fichier disparu du disque n'est pas retiré pour autant. Un dossier déplacé ou
+un disque non monté effacerait sinon un corpus entier sans qu'on l'ait demandé.
 """
 
 import argparse
@@ -244,13 +249,19 @@ def noms_en_double(chemins) -> list[str]:
 
 
 def afficher_etat(chemins, args) -> int:
-    """Montre le registre face à l'index, sans rien modifier.
+    """Montre le registre face à l'index et au corpus, sans rien modifier.
 
-    L'écart entre les deux colonnes est LA chose à surveiller : un registre qui
-    annonce des chunks que l'index ne contient plus signale un `chroma_db/`
-    effacé ou remplacé — la base ne doit alors PAS être crue.
+    Deux désaccords à surveiller, de sens opposés :
+
+    · **écart** — le registre annonce des chunks que l'index ne contient plus :
+      `chroma_db/` a été effacé ou remplacé, la base ne doit PAS être crue ;
+    · **orphelin** — le registre connaît un document absent du corpus : ses
+      chunks sont encore servis comme sources d'un fichier introuvable, et
+      aucun passage d'ingestion ne les retirera, puisqu'il ne parcourt que le
+      corpus. Seul `--forget` les enlève.
     """
     collection = rag.get_collection()
+    sur_disque = {chemin.name for chemin in chemins}
 
     print(f"{'document':<32}{'registre':>9}{'index':>8}   modèle d'embedding")
     print("-" * 76)
@@ -268,12 +279,55 @@ def afficher_etat(chemins, args) -> int:
                 marque = "  ⚠️ écart"
             print(f"{chemin.name:<32}{attendu:>9}{reel:>8}   {modele}{marque}")
 
+        orphelins = [
+            ligne
+            for ligne in ingest.documents_du_registre(session)
+            if ligne.source not in sur_disque
+        ]
+
+    for ligne in orphelins:
+        reel = ingest.compter_chunks(collection, ligne.source)
+        print(
+            f"{ligne.source:<32}{ligne.chunk_count:>9}{reel:>8}   "
+            f"{ligne.embedding_model}  ⚠️ orphelin"
+        )
+
     print("-" * 76)
     if ecart:
         print("⚠️  Un écart signifie que `chroma_db/` ne correspond plus au registre.")
         print("   Relancez avec --force pour reconstruire l'index de ces documents.")
-    else:
-        print("✅ Registre et index concordent.")
+    if orphelins:
+        print("⚠️  Orphelin = inscrit au registre mais absent du corpus : ses chunks")
+        print("   sont encore servis comme sources. Retirez-les avec --forget.")
+    if not ecart and not orphelins:
+        print("✅ Registre, index et corpus concordent.")
+    return 0
+
+
+def oublier_un_document(nom: str) -> int:
+    """Retire un document de l'index ET du registre, sans toucher aux autres.
+
+    Ollama n'est pas requis et n'est donc pas vérifié : supprimer des chunks
+    n'embarque rien. Cette opération reste ainsi possible serveur d'embeddings
+    éteint — l'exact inverse de l'ingestion, qui ne peut rien faire sans lui.
+    """
+    collection = rag.get_collection()
+
+    with Session(engine) as session:
+        if ingest.registre_pour(session, nom) is None:
+            print(f"❌ « {nom} » n'est pas au registre : il n'y a rien à retirer.")
+            print("   `--status` liste ce que le registre connaît.")
+            return 1
+        supprimes = ingest.purger_document(session, collection, nom)
+
+    print(f"🗑️  {nom} … {supprimes} chunk(s) retiré(s) de l'index, registre effacé")
+
+    # Le fichier est-il encore là ? Si oui, le prochain passage le ré-ingérera,
+    # et l'utilisateur croira que le retrait n'a pas fonctionné.
+    restants = [chemin for chemin in collecter_documents() if chemin.name == nom]
+    if restants:
+        print(f"   ⚠️  Le fichier est TOUJOURS dans le corpus ({restants[0].parent}).")
+        print("      Il sera ré-ingéré au prochain passage : déplacez-le ou supprimez-le.")
     return 0
 
 
@@ -291,20 +345,38 @@ def analyser_arguments() -> argparse.Namespace:
         help="ré-ingère tout, même les documents inchangés",
     )
     analyseur.add_argument(
+        "--status",
+        action="store_true",
+        help="affiche le registre et l'index, sans rien écrire",
+    )
+
+    # Ajouter et retirer s'excluent : demander les deux n'a aucun sens, et
+    # argparse le refuse plutôt que d'en ignorer un en silence.
+    actions = analyseur.add_mutually_exclusive_group()
+    actions.add_argument(
         "--only",
         metavar="FICHIER",
         help="ne traiter qu'un seul document (nom de fichier, ex. cours.pdf)",
     )
-    analyseur.add_argument(
-        "--status",
-        action="store_true",
-        help="affiche le registre et l'index, sans rien écrire",
+    actions.add_argument(
+        "--forget",
+        metavar="FICHIER",
+        help="retirer un document de l'index et du registre, sans toucher aux autres",
     )
     return analyseur.parse_args()
 
 
 def main() -> int:
     args = analyser_arguments()
+
+    # `--forget` passe AVANT tout le reste, pour deux raisons :
+    #   · il ne dépend pas du corpus — retirer le dernier document d'un corpus
+    #     vidé doit rester possible, alors que le contrôle « aucun document »
+    #     refuserait de continuer ;
+    #   · il ne dépend pas d'Ollama — supprimer des chunks n'embarque rien.
+    if args.forget:
+        create_db_and_tables()
+        return oublier_un_document(args.forget)
 
     chemins = collecter_documents()
     doublons = noms_en_double(chemins)
@@ -323,7 +395,7 @@ def main() -> int:
             print(f"❌ Aucun document nommé « {args.only} » dans les dossiers du corpus.")
             return 1
 
-    if not chemins:
+    if not chemins and not args.status:
         dossiers = " ou ".join(str(dossier) for dossier in config.CORPUS_DIRS)
         print(f"❌ Aucun document ({', '.join(FORMATS)}) trouvé dans {dossiers}")
         return 1
@@ -331,6 +403,8 @@ def main() -> int:
     create_db_and_tables()
 
     if args.status:
+        # `--status` fonctionne même corpus vide : c'est précisément le moment
+        # où l'on a besoin de voir les orphelins restés au registre.
         return afficher_etat(chemins, args)
 
     # Ollama AVANT de toucher à la base : sans lui, aucun embedding n'est

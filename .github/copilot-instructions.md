@@ -69,6 +69,14 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   d'écrire laisserait un registre affirmant qu'un document est indexé alors qu'il
   ne l'est plus — et il ne serait plus jamais repris. `check_ollama()` reste
   **avant** toute écriture.
+- **Retirer un document est EXPLICITE** (`--forget`) et jamais automatique. Un
+  fichier disparu du disque n'est pas retiré : un dossier déplacé ou un disque
+  non monté viderait sinon l'index sans qu'on l'ait demandé. Un document inscrit
+  mais absent du corpus est un **orphelin** (`--status` le signale) ; ses chunks
+  restent servis comme sources tant que `--forget` n'a pas été lancé.
+  `ingest.purger_document()` efface le registre **avant** l'index — même ordre
+  que l'ingestion, même raison. `--forget` ne vérifie pas Ollama : supprimer
+  n'embarque rien.
 - **Un seul modèle d'embedding par index** : `ensure_embedding_model()` inscrit le
   modèle dans les métadonnées de la collection et **refuse** tout écart. Sans ce
   refus, changer `EMBEDDING_MODEL` produirait des résultats faux en silence.

@@ -32,6 +32,7 @@ class CollectionFactice:
         self.tailles_des_lots: list[int] = []
         self.suppressions: list[dict] = []
         self.echouer_au_prochain_add = False
+        self.echouer_au_prochain_delete = False
 
     def modify(self, metadata):
         """Remplace les métadonnées de la collection."""
@@ -51,6 +52,9 @@ class CollectionFactice:
         self.suppressions.append(where)
         if not where:
             raise ValueError("un delete sans where effacerait toute la base")
+        if self.echouer_au_prochain_delete:
+            self.echouer_au_prochain_delete = False
+            raise RuntimeError("panne simulée de l'index")
         source = where.get("source")
         victimes = [
             cle for cle, (_, meta) in self.chunks.items() if meta.get("source") == source
@@ -387,3 +391,81 @@ def test_oublier_un_document_ne_touche_pas_a_l_index(session, collection):
 def test_oublier_un_document_absent_ne_provoque_pas_d_erreur(session):
     """Idempotent : oublier deux fois n'est pas une faute."""
     ingest.oublier_document(session, "jamais-vu.pdf")
+
+
+# --- Retrait complet d'un document ----------------------------------------
+
+def test_documents_du_registre_liste_tout_le_registre(session, collection):
+    """Sert à repérer les documents inscrits mais absents du corpus."""
+    ingest.ingest_document(
+        session, collection, source="b.pdf", fingerprint="v1", chunks=[morceau()]
+    )
+    ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau()]
+    )
+
+    sources = [ligne.source for ligne in ingest.documents_du_registre(session)]
+
+    assert sources == ["a.pdf", "b.pdf"]
+
+
+def test_purger_retire_le_document_du_registre_et_de_l_index(session, collection):
+    ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau(), morceau()]
+    )
+
+    supprimes = ingest.purger_document(session, collection, "a.pdf")
+
+    assert supprimes == 2
+    assert ingest.registre_pour(session, "a.pdf") is None
+    assert ingest.compter_chunks(collection, "a.pdf") == 0
+
+
+def test_purger_ne_touche_pas_aux_autres_documents(session, collection):
+    """Toute la différence avec l'ancien « supprimer puis recréer »."""
+    ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau()]
+    )
+    ingest.ingest_document(
+        session, collection, source="b.pdf", fingerprint="v1", chunks=[morceau(), morceau()]
+    )
+
+    ingest.purger_document(session, collection, "a.pdf")
+
+    assert ingest.registre_pour(session, "b.pdf") is not None
+    assert ingest.compter_chunks(collection, "b.pdf") == 2
+
+
+def test_purger_un_document_absent_renvoie_zero(session, collection):
+    """Idempotent : retirer deux fois n'est pas une faute."""
+    assert ingest.purger_document(session, collection, "jamais-vu.pdf") == 0
+
+
+def test_une_panne_pendant_la_purge_laisse_le_document_non_inscrit(session, collection):
+    """Le registre est effacé AVANT l'index — l'ordre de l'ingestion, et pour la
+    même raison : une panne doit laisser le document « à reprendre », jamais un
+    registre affirmant la présence de chunks qui n'existent plus."""
+    ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau()]
+    )
+    collection.echouer_au_prochain_delete = True
+
+    with pytest.raises(RuntimeError, match="panne simulée"):
+        ingest.purger_document(session, collection, "a.pdf")
+
+    assert ingest.registre_pour(session, "a.pdf") is None
+
+
+def test_un_document_purge_peut_etre_re_ingere(session, collection):
+    """Le retrait n'est pas une impasse : ré-ingérer doit repartir de zéro."""
+    ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau()]
+    )
+    ingest.purger_document(session, collection, "a.pdf")
+
+    resultat = ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau()]
+    )
+
+    assert resultat.status == "added"
+    assert ingest.compter_chunks(collection, "a.pdf") == 1

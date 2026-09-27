@@ -11,10 +11,12 @@ collection est le substitut en mémoire de `test_ingest`, et la session vient de
 """
 
 import argparse
+import sys
 import zipfile
 
 import build_kb
 import pytest
+from sqlmodel import Session
 from test_epub import ecrire_epub
 from test_ingest import CollectionFactice
 
@@ -23,7 +25,7 @@ from app import config, ingest
 
 def args(force: bool = False) -> argparse.Namespace:
     """Les options telles que `argparse` les fournit au script."""
-    return argparse.Namespace(force=force, only=None, status=False)
+    return argparse.Namespace(force=force, only=None, forget=None, status=False)
 
 
 # --- Collecte des documents -----------------------------------------------
@@ -241,3 +243,122 @@ def test_un_epub_sans_texte_est_ingere_vide(tmp_path, session):
     assert resultat.status == "empty"
     assert resultat.chunks == 0
     assert collection.chunks == {}
+
+
+# --- Retrait d'un document du corpus --------------------------------------
+
+@pytest.fixture(name="index")
+def index_fixture(monkeypatch, engine):
+    """`build_kb` branché sur une base EN MÉMOIRE et une collection factice.
+
+    Le script travaille sur l'`engine` qu'il importe de `app.database` : sans
+    cette substitution, un test écrirait dans la VRAIE base `data/app.db`.
+    """
+    collection = CollectionFactice(embedding_model=config.EMBEDDING_MODEL)
+    monkeypatch.setattr(build_kb, "engine", engine)
+    monkeypatch.setattr(build_kb.rag, "get_collection", lambda: collection)
+    return collection
+
+
+def indexer(collection, source: str, morceaux: int = 1) -> None:
+    """Inscrit un document au registre et l'écrit dans la collection factice."""
+    chunks = [
+        {"text": f"texte {i}", "page": 1, "line_start": i + 1, "line_end": i + 1}
+        for i in range(morceaux)
+    ]
+    with Session(build_kb.engine) as session:
+        ingest.ingest_document(
+            session, collection, source=source, fingerprint="v1", chunks=chunks
+        )
+
+
+def test_forget_retire_le_document_de_l_index_et_du_registre(index, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    indexer(index, "cours.pdf", morceaux=2)
+
+    code = build_kb.oublier_un_document("cours.pdf")
+
+    assert code == 0
+    assert index.chunks == {}
+    with Session(build_kb.engine) as session:
+        assert ingest.registre_pour(session, "cours.pdf") is None
+
+
+def test_forget_ne_touche_pas_aux_autres_documents(index, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    indexer(index, "cours.pdf")
+    indexer(index, "autre.pdf")
+
+    build_kb.oublier_un_document("cours.pdf")
+
+    with Session(build_kb.engine) as session:
+        assert ingest.registre_pour(session, "autre.pdf") is not None
+    assert index.chunks != {}
+
+
+def test_forget_refuse_un_document_absent_du_registre(index, capsys):
+    assert build_kb.oublier_un_document("jamais-vu.pdf") == 1
+    assert "pas au registre" in capsys.readouterr().out
+
+
+def test_forget_avertit_si_le_fichier_est_encore_dans_le_corpus(
+    index, tmp_path, monkeypatch, capsys
+):
+    """Sans avertissement, le document reviendrait au passage suivant et le
+    retrait semblerait n'avoir servi à rien."""
+    (tmp_path / "cours.pdf").write_bytes(b"%PDF-1.4 faux")
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    indexer(index, "cours.pdf")
+
+    build_kb.oublier_un_document("cours.pdf")
+
+    assert "TOUJOURS dans le corpus" in capsys.readouterr().out
+
+
+def test_forget_ne_dit_rien_quand_le_fichier_a_disparu(
+    index, tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    indexer(index, "cours.pdf")
+
+    build_kb.oublier_un_document("cours.pdf")
+
+    assert "TOUJOURS" not in capsys.readouterr().out
+
+
+def test_forget_fonctionne_quand_le_corpus_est_vide(index, tmp_path, monkeypatch):
+    """Retirer le DERNIER document doit rester possible : c'est justement le
+    moment où l'on veut nettoyer un corpus qu'on vient de vider."""
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))  # dossier vide
+    monkeypatch.setattr(build_kb, "create_db_and_tables", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["build_kb.py", "--forget", "cours.pdf"])
+    indexer(index, "cours.pdf")
+
+    assert build_kb.main() == 0
+    assert index.chunks == {}
+
+
+def test_status_reste_possible_corpus_vide(index, tmp_path, monkeypatch, capsys):
+    """C'est le moment où l'on a le plus besoin de voir les orphelins."""
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    monkeypatch.setattr(build_kb, "create_db_and_tables", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["build_kb.py", "--status"])
+    indexer(index, "cours.pdf")
+
+    assert build_kb.main() == 0
+    sortie = capsys.readouterr().out
+    assert "cours.pdf" in sortie
+    assert "orphelin" in sortie
+
+
+def test_status_ne_signale_pas_d_orphelin_quand_tout_est_la(
+    index, tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "cours.pdf").write_bytes(b"%PDF-1.4 faux")
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    monkeypatch.setattr(build_kb, "create_db_and_tables", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["build_kb.py", "--status"])
+    indexer(index, "cours.pdf")
+
+    assert build_kb.main() == 0
+    assert "orphelin" not in capsys.readouterr().out
