@@ -158,6 +158,18 @@ def oublier_document(session: Session, source: str) -> None:
         session.commit()
 
 
+def documents_du_registre(session: Session) -> list[IngestedDocument]:
+    """Toutes les lignes du registre, triées par nom de document.
+
+    Sert à repérer les documents INSCRITS mais ABSENTS du corpus. Sans cette
+    liste, un document supprimé du disque resterait invisible : il ne serait
+    plus jamais parcouru, et ses chunks continueraient d'être servis comme
+    sources d'un fichier que plus personne ne peut ouvrir.
+    """
+    lignes = session.exec(select(IngestedDocument)).all()
+    return sorted(lignes, key=lambda ligne: ligne.source)
+
+
 # --- Écriture dans l'index ------------------------------------------------
 
 def supprimer_chunks(collection, source: str) -> None:
@@ -295,3 +307,24 @@ def compter_chunks(collection, source: str | None = None) -> int:
         return collection.count()
     resultat = collection.get(where={"source": source}, include=[])
     return len(resultat.get("ids", []))
+
+
+# --- Retrait d'un document ------------------------------------------------
+
+def purger_document(session: Session, collection, source: str) -> int:
+    """Retire un document de l'index ET du registre ; renvoie les chunks supprimés.
+
+    C'est l'opération inverse de `ingest_document`, et elle est EXPLICITE :
+    aucun passage d'ingestion ne supprime de lui-même un document disparu du
+    disque. Un dossier déplacé, un disque non monté ou un renommage feraient
+    alors disparaître un corpus entier sans que personne ne l'ait demandé.
+
+    L'ordre est celui de l'ingestion, et pour la même raison : le registre
+    d'abord, l'index ensuite. Une panne entre les deux laisse un document « non
+    ingéré » — donc repris si le fichier revient — plutôt qu'un registre
+    affirmant la présence de chunks qui n'existent plus.
+    """
+    supprimes = compter_chunks(collection, source)
+    oublier_document(session, source)
+    supprimer_chunks(collection, source)
+    return supprimes

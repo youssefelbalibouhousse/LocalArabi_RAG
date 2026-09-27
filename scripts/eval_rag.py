@@ -282,9 +282,15 @@ def mode_run(args: argparse.Namespace) -> int:
 
     if not a_mesurer:
         afficher(
-            "❌ Aucune question mesurable : la source d'AUCUNE d'entre elles n'est "
-            "indexée.\n"
-            "   Les documents correspondants ont-ils été retirés de data/documents/ ?"
+            "❌ Aucune question mesurable : la source d'AUCUNE d'entre elles n'est\n"
+            "   indexée. Deux causes possibles, et deux remèdes :\n"
+            "   · les documents visés ont été RETIRÉS du corpus — `build_kb.py\n"
+            "     --status` les montre en « orphelin » du registre, et `--forget`\n"
+            "     finit de les enlever ;\n"
+            "   · le jeu d'or vise des documents qui n'ont jamais été indexés :\n"
+            "     les questions doivent alors être réécrites pour le corpus actuel.\n"
+            "   En attendant, le harnais refuse de mesurer : un score de 0 % dirait\n"
+            "   le contraire de la vérité."
         )
         return 1
 

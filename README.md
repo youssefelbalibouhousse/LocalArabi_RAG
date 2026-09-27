@@ -101,14 +101,22 @@ Optionnel : copier `.env.example` en `.env` pour surcharger la configuration.
 2. **Mettre à jour la base vectorielle** :
    ```bash
    python scripts/build_kb.py                 # n'ingère que ce qui a changé
-   python scripts/build_kb.py --status        # registre face à l'index
+   python scripts/build_kb.py --status        # registre face à l'index et au corpus
    python scripts/build_kb.py --force         # tout ré-ingérer
    python scripts/build_kb.py --only x.pdf    # un seul document
+   python scripts/build_kb.py --forget x.pdf  # en RETIRER un (index + registre)
    ```
    L'ingestion est **incrémentale** : un document dont le contenu n'a pas changé
    est ignoré (comparaison d'empreintes SHA-256, jamais de dates). Elle est aussi
    **non destructive** : seule la part d'un document est remplacée, jamais toute
    la collection.
+
+   **Retirer un document est une action explicite** (`--forget`). Effacer le
+   fichier ne suffit pas, et c'est volontaire : un dossier déplacé ou un disque
+   non monté effacerait sinon un corpus entier sans que personne ne l'ait
+   demandé. Tant que le document reste au registre, `--status` le signale comme
+   **orphelin** — ses chunks sont encore servis comme sources d'un fichier que
+   plus personne ne peut ouvrir.
 3. **Lancer l'API** :
    ```bash
    uvicorn app.main:app --reload
@@ -259,6 +267,7 @@ non de la qualité de la récupération.
 |---|---|
 | Configuration | `app/config.py` est la **source unique de vérité**, surchargeable par variables d'environnement |
 | Ingestion | **Incrémentale et non destructive** : empreinte SHA-256 du contenu, remplacement par document, écriture par lots bornés. Registre dans `data/app.db`. Un index refuse de mélanger deux modèles d'embedding. |
+| Retrait | **Explicite** (`--forget`) et jamais automatique : un fichier disparu du disque n'est pas retiré pour autant. La purge efface le registre **avant** l'index, comme l'ingestion, pour qu'une panne laisse le document repris plutôt qu'inscrit à tort. |
 | Formats | PDF (`pypdf`) et EPUB (`app/epub.py`), ramenés à la **même forme** en sortie : `chunk_pages` et toute la chaîne traitent les deux sans distinction |
 | Taille des lots | `INGEST_BATCH_SIZE` (32 par défaut) et `EMBEDDING_TIMEOUT` (120 s) se lisent **ensemble** : un lot est embarqué en une seule requête. Mesuré ici : ~0,55 s par chunk, donc 256 chunks dépassaient le délai de 60 s de la bibliothèque — l'écriture échouait en « timed out in add » |
 | Fournisseur LLM | `LLM_PROVIDER=ollama` (auto-hébergé) ou `openai` (Groq, Together, vLLM…) |
