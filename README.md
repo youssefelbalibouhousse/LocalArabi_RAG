@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/youssefelbalibouhousse/LocalArabi_RAG/actions/workflows/ci.yml/badge.svg)](https://github.com/youssefelbalibouhousse/LocalArabi_RAG/actions/workflows/ci.yml)
 
-Chatbot de questions/réponses en arabe sur des documents PDF, basé sur
+Chatbot de questions/réponses en arabe sur des documents **PDF et EPUB**, basé sur
 **FastAPI**, **ChromaDB** et **Ollama** (embeddings `bge-m3`, génération `llama3.1`).
 Chaque réponse cite ses sources : fichier, page et intervalle de lignes.
 
@@ -13,6 +13,7 @@ app/
 ├── config.py        # Configuration centralisée (chemins, modèles, URL)
 ├── rag.py           # Logique RAG : récupération + génération
 ├── ingest.py        # Ingestion incrémentale et bornée (registre, lots)
+├── epub.py          # Extraction des EPUB (corpus Shamela)
 ├── evaluation.py    # Mesure de la qualité de la récupération (hit@k, MRR)
 ├── language.py      # Détection arabe/français (respect de la langue)
 ├── auth.py          # JWT + hachage des mots de passe
@@ -33,9 +34,33 @@ eval/
 ├── golden.jsonl         # Jeu d'or : questions de référence (versionné)
 └── results/             # Rapports de mesure (non versionnés)
 tests/               # Suite pytest
-data/documents/      # Déposer ici les PDF à indexer
+data/documents/      # Corpus versionné : les PDF et EPUB de démonstration
+data/shamela/        # Corpus sous droits, IGNORÉ par Git (voir « Corpus »)
 chroma_db/           # Base vectorielle générée (non versionnée)
 ```
+
+## Corpus
+
+Deux formats sont lus, dans deux dossiers (`config.CORPUS_DIRS`) :
+
+| Dossier | Format | Versionné | Pourquoi |
+|---|---|---|---|
+| `data/documents/` | PDF, EPUB | oui | Corpus de démonstration, public |
+| `data/shamela/` | EPUB | **non** | Téléchargé depuis [shamela.ws](https://shamela.ws) : le texte est numérique, mais les éditions modernes restent sous droits d'éditeurs tiers |
+
+Le dossier n'est qu'un rangement : les deux sont indexés de la même façon.
+
+**Pourquoi l'EPUB plutôt qu'un PDF ?** Un PDF océrisé transporte les erreurs de
+l'OCR dans sa couche texte, et aucune extraction ne peut les réparer — il n'y a
+plus d'image à ré-océriser. Sur le PDF de démonstration, 77 % des chunks
+contiennent une forme abîmée du mot central. Un EPUB de Shamela, lui, donne le
+texte **numérique** : lettres liées, hamzas correctes, notes de bas de page en
+clair — et, détail décisif, **la pagination imprimée**, ce qui permet à la
+citation `(fichier, page, lignes)` de désigner une page que le lecteur retrouve
+dans son exemplaire.
+
+> ⚠️ Un fichier identifié par son **nom**, deux homonymes dans deux dossiers se
+> remplaceraient dans l'index. `build_kb.py` refuse de démarrer dans ce cas.
 
 ## Prérequis
 
@@ -71,7 +96,8 @@ Optionnel : copier `.env.example` en `.env` pour surcharger la configuration.
 
 ## Utilisation
 
-1. **Déposer les PDF** dans `data/documents/`.
+1. **Déposer les documents** (PDF, EPUB) dans `data/documents/` — ou dans
+   `data/shamela/` pour les EPUB sous droits (ignoré par Git).
 2. **Mettre à jour la base vectorielle** :
    ```bash
    python scripts/build_kb.py                 # n'ingère que ce qui a changé
@@ -233,6 +259,8 @@ non de la qualité de la récupération.
 |---|---|
 | Configuration | `app/config.py` est la **source unique de vérité**, surchargeable par variables d'environnement |
 | Ingestion | **Incrémentale et non destructive** : empreinte SHA-256 du contenu, remplacement par document, écriture par lots bornés. Registre dans `data/app.db`. Un index refuse de mélanger deux modèles d'embedding. |
+| Formats | PDF (`pypdf`) et EPUB (`app/epub.py`), ramenés à la **même forme** en sortie : `chunk_pages` et toute la chaîne traitent les deux sans distinction |
+| Taille des lots | `INGEST_BATCH_SIZE` (32 par défaut) et `EMBEDDING_TIMEOUT` (120 s) se lisent **ensemble** : un lot est embarqué en une seule requête. Mesuré ici : ~0,55 s par chunk, donc 256 chunks dépassaient le délai de 60 s de la bibliothèque — l'écriture échouait en « timed out in add » |
 | Fournisseur LLM | `LLM_PROVIDER=ollama` (auto-hébergé) ou `openai` (Groq, Together, vLLM…) |
 | Inscription | Ouverte en développement, **fermée par défaut en production** |
 | Clé JWT | Minimum 32 octets (RFC 7518) ; l'application refuse de démarrer en production avec la clé de développement |

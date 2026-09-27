@@ -27,4 +27,14 @@ ignore = [
     # signature. C'est le pattern officiel du framework : bugbear le signale
     # à tort comme un appel de fonction en valeur par défaut.
     "B008",
+
+    # Caractères Unicode dits « ambigus » : ruff signale tout caractère non
+    # latin qui ressemble à un caractère latin — « ا » lui rappelle « l ».
+    # Le corpus de ce projet est ARABE : de l'arabe dans une chaîne, une
+    # docstring ou un commentaire y est légitime, pas suspect. Ces règles
+    # produiraient donc plus de bruit que de valeur, et masqueraient les
+    # avertissements qui comptent.
+    "RUF001",  # chaîne
+    "RUF002",  # docstring
+    "RUF003",  # commentaire
 ]

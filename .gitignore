@@ -14,6 +14,10 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
+# Configuration d'éditeur : propre à chaque machine, jamais partagée.
+.idea/
+.vscode/
+
 # Artefacts de test
 .pytest_cache/
 .coverage
@@ -44,3 +48,9 @@ frontend/app.css
 # raisonnement que pour frontend/app.css : on versionne la source (le jeu d'or
 # eval/golden.jsonl), pas le résultat.
 eval/results/
+
+# --- Corpus Shamela ---
+# EPUB téléchargés depuis shamela.ws. Le TEXTE est numérique et propre, mais les
+# ÉDITIONS modernes sont sous droits d'éditeurs tiers : ne JAMAIS les pousser.
+# Cet avertissement est la contrepartie assumée du choix de corpus mixte.
+data/shamela/
