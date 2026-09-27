@@ -23,46 +23,73 @@
 #   # écrivez une question par extrait ci-dessous, puis :
 #   python scripts/eval_rag.py --run --label baseline
 #
-# --- 30 questions, toutes en « draft » -------------------------------------
+# --- 36 questions sur 12445.epub, toutes en « draft » ----------------------
 #
-# La source attendue de chaque question a été relevée dans le document, mais
-# elle doit être RELUE ET CONFIRMÉE : passer une question en « validated » est
-# un jugement humain, pas une formalité. Un jeu d'or dont on n'a pas vérifié
-# les réponses mesure autre chose que ce qu'on croit.
+# Corpus : الإجماع لابن المنذر (Shamela, ouvrage 12445), 144 pages imprimées.
+# Le livre est une suite de questions numérotées (المسائل) groupées par
+# chapitre : chaque question ci-dessous vise UNE page imprimée précise, lue
+# dans l'édition, et couvre un chapitre différent (طهارة، صلاة، زكاة، حج،
+# نكاح، طلاق، بيوع، شهادات، فرائض، حدود، ديات، عتق، قسمة…).
 #
-# ⚠️ Plusieurs questions visent la MÊME page (16, 12, 5...). Or la
-# correspondance s'arrête à la page : cinq questions sur la page 16 sont donc
-# satisfaites par N'IMPORTE QUEL extrait de cette page, ce qui rend le score
-# trop indulgent. Les notes indiquent les lignes : les resserrer plus tard
-# rendra le harnais beaucoup plus exigeant.
-
-{"id": "q001", "question": "ما هو اسم الكتاب الذي يتم شرحه في هذا النص؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 3}], "notes": "Extrait page 3 : « شرح كتاب الاعتكاف من كتاب دليل الطالب لنيل المطالب ». À confirmer avant de s'y fier."}
-{"id": "q002", "question": "هل يبطل الاعتكاف بالخروج من المسجد لغير عذر؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 4}], "notes": "Extrait page 4 : « ويبطل الاعتكاف: بالخروج من المسجد لغير عُذر ». À confirmer avant de s'y fier."}
-{"id": "q003", "question": "هل تبطل نية الخروج من المسجد بغير عذر الاعتكاف عند الجمهور حتى لو لم يخرج؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 5}], "notes": "Extrait page 5 : « أما الجمهور ومنهم الحنابلة في المذهب: فلا يقولون به، ولا يبطل اعتكافه بمجرد نية الخروج ». À confirmer avant de s'y fier."}
-{"id": "q004", "question": "ما حكم الجماع (الوطء في الفرج) للمعتكف عامدًا ذاكرًا؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 5}], "notes": "Extrait page 5 : « فإذا جامع المعتكف عالما، ذاكرًا؛ فإن اعتكافه يبطل بإجماع العلماء ». À confirmer avant de s'y fier."}
-{"id": "q005", "question": "هل يبطل اعتكاف من جامع أهله جاهلاً أو ناسيًا؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 6}], "notes": "Extrait page 6 : « أما لو جامع المعتكف جاهلا أو ناسيا فإن الراجح من أقوال أهل العلم أن اعتكافه لا يبطل ». À confirmer avant de s'y fier."}
-{"id": "q006", "question": "ما حكم المباشرة (اللمس) بغير شهوة للمعتكف؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 6}], "notes": "Extrait page 6 : « أن يكون ذلك بغير شهوة... فهذا لا يضر الاعتكاف؛ بل ليس ممنوعا ». À confirmer avant de s'y fier."}
-{"id": "q007", "question": "هل يبطل الاعتكاف بالمباشرة بشهوة إذا لم يحدث إنزال؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 7}], "notes": "Extrait page 7 : « إذا باشر بلذة، لكن لم ينزل فالصواب أن الاعتكاف لا يبطل بهذا ». À confirmer avant de s'y fier."}
-{"id": "q008", "question": "ما هو القول الراجح عند الشارح في المباشرة مع الإنزال للمعتكف؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 7}], "notes": "Extrait page 7 : « فالراجح عندي - والله أعلم - : أن المباشرة حرام... لكن إن باشر حتى أنزل كان الإثم أشد، لكن اعتكافه لا يبطل ». À confirmer avant de s'y fier."}
-{"id": "q009", "question": "ما هو رأي الشيخ ابن باز رحمه الله في بطلان الاعتكاف بالإنزال مع المباشرة؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 8}], "notes": "Extrait page 8 : « وهذا اختيار شيخنا الشيخ ابن باز - رحمه الله - أنه لا يبطل اعتكافه بالإنزال مع المباشرة ». À confirmer avant de s'y fier."}
-{"id": "q010", "question": "هل تبطل الردة الاعتكاف؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 8}], "notes": "Extrait page 8 : « وبالردة... فمن كفر وهو معتكف... فإن اعتكافه يبطل ». À confirmer avant de s'y fier."}
-{"id": "q011", "question": "لماذا يبطل السكر الاعتكاف؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 9}], "notes": "Extrait page 9 : « السكران ليس من أهل المسجد... ولأن السكر يذهب العقل، وإذا ذهب العقل انقطعت النية ». À confirmer avant de s'y fier."}
-{"id": "q012", "question": "ماذا يجب على من بطل اعتكافه المنذور المتتابع غير المقيد بزمن؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 9}], "notes": "Extrait page 9 : « يلزمه أن يستأنف الاعتكاف أسبوعًا كاملا... ولا كفارة عليه ». À confirmer avant de s'y fier."}
-{"id": "q013", "question": "ماذا يجب على من بطل اعتكافه المنذور المتتابع المقيد بزمن معين؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 10}], "notes": "Extrait page 10 : « وإن كان مقيدا بزمن معين، استأنفه، وعليه كفارة يمين؛ لفوات المحل ». À confirmer avant de s'y fier."}
-{"id": "q014", "question": "في النذر غير المتتابع (مثال: عشرة أيام)، إذا بطل الاعتكاف في يوم، هل يبطل ما قبله؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 10}], "notes": "Extrait page 10 : « إنما يبطل اعتكاف اليوم الذي وقع فيه، ثم يكمل العشرة ». À confirmer avant de s'y fier."}
-{"id": "q015", "question": "هل يجوز للمعتكف الخروج لقضاء الحاجة (البول والغائط)؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 11}], "notes": "Extrait page 11 : « ولا يبطل الاعتكاف إن خرج من المسجد لبول، أو غائط ». À confirmer avant de s'y fier."}
-{"id": "q016", "question": "هل يجوز للمعتكف الخروج للأكل والشرب إذا كان متيسرًا في المسجد؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 11}], "notes": "Extrait page 11 : « الأكل والشرب يقول الفقهاء: إن تيسر للمعتكف في المسجد فلا يجوز له أن يخرج من أجله ». À confirmer avant de s'y fier."}
-{"id": "q017", "question": "هل يعتبر الخروج للطهارة الواجبة عذرًا لا يبطل الاعتكاف؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 12}], "notes": "Extrait page 12 : « وما لابد له منه شرعًا: الطهارة الواجبة... له أن يخرج ليتوضأ إذا كان لا يمكن فعل ذلك في المسجد ». À confirmer avant de s'y fier."}
-{"id": "q018", "question": "ما حكم خروج المعتكف لصلاة الجمعة عند الجمهور إذا كان في مسجد لا تقام فيه؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 12}], "notes": "Extrait page 12 : « عند الجمهور له أن يخرج، ولا يبطل اعتكافه ». À confirmer avant de s'y fier."}
-{"id": "q019", "question": "ما حكم خروج المعتكف للجمعة عند المالكية؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 12}], "notes": "Extrait page 12 : « وعند المالكية... إن خرج للجمعة بطل اعتكافه ». À confirmer avant de s'y fier."}
-{"id": "q020", "question": "ماذا روت عائشة رضي الله عنها عن المعتكف وعيادة المريض؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 12}], "notes": "Extrait page 12-13 : « السنة على المعتكف أن لا يعود مريضا... ولا يخرج لحاجة إلا لما لا بد منه ». À confirmer avant de s'y fier."}
-{"id": "q021", "question": "كيف كانت عائشة رضي الله عنها تسأل عن المريض وهي معتكفة؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 13}], "notes": "Extrait page 13 : « إن كنتُ لأدخل البيت للحاجة والمريض فيه فما أسألُ عنه إلا وأنا مارة ». À confirmer avant de s'y fier."}
-{"id": "q022", "question": "متى يجوز للمعتكف أن يذهب إلى بيته ليأكل أو يغتسل؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 14}], "notes": "Extrait page 14 : « إن كان فعل ذلك في المكان القريب من المسجد لا يليق به، أو يحتشم منه، فله أن يذهب إلى بيته ». À confirmer avant de s'y fier."}
-{"id": "q023", "question": "ما حكم خروج المعتكف لاتباع الجنازة إذا اشترط ذلك عند بدء الاعتكاف؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 14}], "notes": "Extrait page 14 : « أما إذا اشترط الخروج لذلك... فإنه عند الجمهور ينفعه ذلك، وإذا خرج لا يبطل اعتكافه ». À confirmer avant de s'y fier."}
-{"id": "q024", "question": "ما هو رأي المالكية في مسألة الاشتراط في الاعتكاف؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 15}], "notes": "Extrait page 15 : « وأما المالكية : فيمنعون الاشتراط في الاعتكاف من أصله، ويرونه بدعة محدثة ». À confirmer avant de s'y fier."}
-{"id": "q025", "question": "متى ينفع الاشتراط في الاعتكاف عند الجمهور؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 15}], "notes": "Extrait page 15 : « أن الاشتراط ينفعه إذا كان في طاعة لا تتكرر، كأن اشترط أن يتبع جنازة معينة ». À confirmer avant de s'y fier."}
-{"id": "q026", "question": "هل يشرع لمن قصد المسجد للصلاة أن ينوي الاعتكاف مدة لبثه فيه؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 16}], "notes": "Extrait page 16 : « الأقرب - والله أعلم - : أن هذا لا يُشرع؛ لأن الأصل في العبادات التوقيف ». À confirmer avant de s'y fier."}
-{"id": "q027", "question": "ما هو أقل ما ورد في الشرع لمدة الاعتكاف وفقاً للشارح؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 16}], "notes": "Extrait page 16 : « وأقل ما ورد في الشرع من الاعتكاف، الاعتكاف ليلة، والنهار مثل الليل ». À confirmer avant de s'y fier."}
-{"id": "q028", "question": "ماذا يُنصح لمن لا يتيسر له اعتكاف العشر الأواخر كاملة؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 16}], "notes": "Extrait page 16 : « ومن كان لا يتيسر له أن يعتكف كل العشر الأواخر فليعتكف الأوتار ليلها ونهارها ». À confirmer avant de s'y fier."}
-{"id": "q029", "question": "لمن لا يستطيع اعتكاف ليالي الأوتار كاملة، ما هي الليالي الثلاثة المؤكدة؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 16}], "notes": "Extrait page 16 : « فليعتكف ليلة ثلاث وعشرين وخمس وعشرين وسبع وعشرين ». À confirmer avant de s'y fier."}
-{"id": "q030", "question": "إذا لم يتيسر للمسلم سوى ليلة واحدة للاعتكاف، فأي ليلة يختارها بحسب النص؟", "lang": "ar", "status": "draft", "expected": [{"source": "arabic_document.pdf", "page": 16}], "notes": "Extrait page 16 : « فإن كان لا يتيسر له فليعتكف ليلة سبع وعشرين ». À confirmer avant de s'y fier."}
+# ⚠️ UNE PAGE PAR QUESTION, jamais deux. C'est une correction délibérée : le
+#    jeu précédent posait jusqu'à cinq questions sur la même page, et comme la
+#    correspondance s'arrête à la page, N'IMPORTE QUEL extrait de cette page
+#    satisfaisait les cinq — ce qui rendait le score trop indulgent.
+#
+# ⚠️ Chaque note cite le passage exact attendu. Elle sert à RELIRE et à
+#    confirmer la question avant de la passer en « validated » : un jeu d'or
+#    dont on n'a pas vérifié les réponses mesure autre chose que ce qu'on croit.
+#
+# Le jeu précédent visait le PDF de démonstration, retiré du corpus parce que
+# son texte était corrompu par un mauvais OCR (77 % des chunks abîmés). Il
+# reste consultable dans l'historique Git :
+#     git show 09f7844:eval/golden.jsonl
+#
+# --- Vérification des pages attendues --------------------------------------
+#
+# Les 36 pages attendues ont été VÉRIFIÉES, pas supposées : pour chaque
+# question, le numéro de la مسألة cité dans la note a été recherché dans les
+# 144 pages du texte. Il n'apparaît que sur la page attendue — sauf pour
+# q004 à q008, où le même nombre existe aussi dans l'index des sources
+# (p. 143-154), dont les entrées sont numérotées de 1 à ~130. Collision de
+# numérotation propre au livre, pas erreur de ce fichier.
+#
+# La promotion en « validated » reste néanmoins une LECTURE humaine : une
+# recherche prouve qu'une page contient le passage, pas qu'il répond à la
+# question.
+{"id": "q001", "question": "بماذا كان يُكنى ابن المنذر؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 7}], "notes": "ويكنى أبا بكر بن المنذر ومشهور بابن المنذر (ص 7). La kunya n'est écrite qu'ici : vérifié par recherche sur les 144 pages."}
+{"id": "q002", "question": "على أي كتب اعتمد المحقق في توثيق نصوص كتاب الإجماع؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 28}], "notes": "كتاب الإقناع، والجزء الثاني من كتاب الإشراف، وأجزاء متفرقة من الأوسط في السنن، والإجماع والاختلاف."}
+{"id": "q003", "question": "ما الأحداث التي تنقض الطهارة وتوجب الوضوء بإجماع أهل العلم؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 33}], "notes": "خروج الغائط من الدبر، وخروج البول من الذكر، وخروج المني، وخروج الريح، وزوال العقل."}
+{"id": "q004", "question": "هل يجوز التيمم بالتراب ذي الغبار؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 36}], "notes": "18 - وأجمعوا على أن التيمم بالتراب الغبار جائز."}
+{"id": "q005", "question": "ما حكم من تكلم في صلاته عامدًا لا يريد إصلاح شيء من أمرها؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 39}], "notes": "46 - وجمعوا على أن من تكلم في صلاته عامدا... أن صلاته فاسدة."}
+{"id": "q006", "question": "كيف يصلي من لا يطيق القيام؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 42}], "notes": "65 - وأجمعوا على أن فرض من لا يطيق القيام أن يصلي جالسا."}
+{"id": "q007", "question": "كم تجب في الإبل من الشاة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 45}], "notes": "88 - وأجمعوا على أن في خمس من الإبل شاة."}
+{"id": "q008", "question": "هل يجوز دفع زكاة المال إلى أهل الذمة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 48}], "notes": "118 - وأجمعوا على أن الذمي لا يعطى من زكاة الأموال شيئا."}
+{"id": "q009", "question": "كم حجة تجب على المرء في عمره؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 51}], "notes": "136 - وأجمعوا أن على المرء في عمره حجة واحدة: حجة الإسلام إلا أن ينذر نذرا."}
+{"id": "q010", "question": "هل يجوز للمحرم صيد البحر وأكله وبيعه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 54}], "notes": "159 - وأجمعوا على أن صيد البحر للمحرم مباح اصطياده، وأكله، وبيعه، وشرؤاه."}
+{"id": "q011", "question": "ما حكم من فاته الوقوف بعرفة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 57}], "notes": "187 - وأجمعوا على أن الوقوف بعرفة فرض، ولا حج لمن فاته الوقوف بها."}
+{"id": "q012", "question": "هل تجزئ حجة الرجل عن المرأة، وحجة المرأة عن الرجل؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 60}], "notes": "210 - وأجمعوا على أن الحج الرجل عن المرأة، والمرأة عن الرجل: يجزئ."}
+{"id": "q013", "question": "كم سهم الفرس وكم سهم الراجل من الغنيمة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 63}], "notes": "238 - وأجمعوا على أن للفرس سهمين، وللراجل سهما."}
+{"id": "q014", "question": "هل يجب استحلاف المدعى عليه في الأموال؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 66}], "notes": "257 - وأجمعوا على وجوب استحلاف المدعى عليه في الأموال."}
+{"id": "q015", "question": "كيف يقسم مال الميت بين أولاده إذا لم يكن معهم أحد من أهل الفرائض؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 69}], "notes": "277 - وجعل الفاضل من المال بين الولد: للذكر مثل حظ الأُنثيين."}
+{"id": "q016", "question": "هل يرث الإخوة مع الابن أو ابن الابن وإن سفل، أو مع الأب؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 72}], "notes": "298 - لا يرثون مع الابن، ولا ابن الابن وإن سفل، ولا مع الأب."}
+{"id": "q017", "question": "كيف يرث الخنثى؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 75}], "notes": "327 - وأجمعوا على أن الخنثى يرث من حيث يبول."}
+{"id": "q018", "question": "هل للموصي أن يرجع في وصيته؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 78}], "notes": "347 - وأجمعوا على أن الرجل أن يرجع في كل ما يوصي به إلا العتق."}
+{"id": "q019", "question": "هل تنكح المرأة على عمتها أو على خالتها؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 81}], "notes": "370 - وأجمعوا على أن لا تنكح المرأة على عمتها. ولا على خالتها."}
+{"id": "q020", "question": "من أحق بالولد الصغير إذا افترق الزوجان؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 84}], "notes": "393 - وأجمعوا أن الزوجين إذا افترقا ولهما ولد أن الأم أحق به ما لم تنكح."}
+{"id": "q021", "question": "ما حكم النصرانيين الزوجين إذا أسلم الزوج قبل المرأة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 87}], "notes": "418 - أنهما على نكاحهما كانت مدخولًا بها، أو لم يكن."}
+{"id": "q022", "question": "كم عدة الحرة المسلمة التي ليست بحامل من وفاة زوجها؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 90}], "notes": "441 - أربعة أشهر وعشرا، مدخولا بها وغير مدخول، صغيرة لم تبلغ أو كبيرة."}
+{"id": "q023", "question": "هل تمنع المرأة في الإحداد من الطيب والزينة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 93}], "notes": "460 - وأجمعوا على منع المرأة في الإحداد: من الطيب والزينة."}
+{"id": "q024", "question": "هل يجوز بيع الدين بالدين؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 96}], "notes": "482 - وأجمعوا على أن بيع الدين بالدين لا يجوز."}
+{"id": "q025", "question": "ما حكم من باع سلعة بثمن مجهول غير معلوم ولا مسمى؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 99}], "notes": "504 - أن البيع فاسد."}
+{"id": "q026", "question": "هل يجوز للمسلم أن يرتهن المصحف من أخيه المسلم؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 102}], "notes": "526 - وأجمعوا على أن المسلم أن يرتهن المصحف من أخيه المسلم."}
+{"id": "q027", "question": "ما حكم اكتراء الأرض بالذهب والفضة لوقت معلوم؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 105}], "notes": "541 - وأجمعوا على أن اكتراء الأرض بالذهب والفضة، وقتا معلوما جائز."}
+{"id": "q028", "question": "هل يضمن المودَع الوديعة إذا أحرزها في صندوقه ثم تلفت؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 108}], "notes": "561 - ألا ضمان عليه."}
+{"id": "q029", "question": "هل تنفسخ الكتابة إذا وفّق السيد عن مطالبة المكاتب بنجومه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 111}], "notes": "585 - أن الكتابة لا تنفسخ ما داما ثابتين على العقد الأول."}
+{"id": "q030", "question": "ما حكم هبة المسلم للذمي وهبة الذمي للمسلم إذا قبض الموهوب؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 114}], "notes": "603 - أن ذلك جائز."}
+{"id": "q031", "question": "هل على العبد قطع إذا سرق من مولاه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 117}], "notes": "623 - وأجمعوا على أن لا قطع على العبد إذا سرق من مولاه."}
+{"id": "q032", "question": "هل تجوز الكفالة في الحدود؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 120}], "notes": "649 - وأجمعوا على أنه لا يجوز الكفالة في الحدود."}
+{"id": "q033", "question": "كم يجب في المأمومة من الدية؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 123}], "notes": "676 - وأجمعوا على أن في المأمومة ثلث الدية."}
+{"id": "q034", "question": "هل تحمل العاقلة دية القتل العمد؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 126}], "notes": "705 - وأجمعوا على أن العاقلة لا تحمل دية العمد، وأنها تحمل دية الخطأ."}
+{"id": "q035", "question": "ماذا يحدث إذا ملك الرجل أبويه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 129}], "notes": "727 - وأجمعوا أن الرجل إذا ملك أبويه... أنهم يعتقون عليه ساعة تملكهم."}
+{"id": "q036", "question": "متى تجب قسمة الأرض بين الشركاء؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 132}], "notes": "750 - الأرض إذا كانت بين شركاء، واحتملت القسمة عن غير ضرر يلحق أحدا منهم: قسمت."}
