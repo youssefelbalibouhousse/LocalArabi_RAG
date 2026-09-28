@@ -174,13 +174,25 @@ C'est ce chiffre — pas une intuition — qui décide d'une location de GPU.
 ```json
 {
   "question": "...",
-  "answer": "... الإجابة ...\n\n📄 المصادر: arabic_document.pdf — صفحة 5 (الأسطر 3-12)",
+  "answer": "... الإجابة ...\n\n📄 المصادر: الإجماع لابن المنذر — صفحة 81 (الأسطر 1-5)",
   "sources": [
-    {"source": "arabic_document.pdf", "page": 5, "line_start": 3, "line_end": 12}
+    {
+      "source": "12445.epub",
+      "title": "الإجماع لابن المنذر ت فؤاد ط المسلم",
+      "page": 81,
+      "line_start": 1,
+      "line_end": 5
+    }
   ],
   "context_used": ["..."]
 }
 ```
+
+> 💡 `source` est le **nom de fichier** : la clé d'identification, celle que
+> connaissent le registre, l'index et le jeu d'or. `title` est ce qui est
+> **montré** — la seule mention qui permette au lecteur de retrouver la page
+> dans son exemplaire. La citation nomme aussi l'**édition** : la pagination
+> appartient à cette impression-là, pas à l'ouvrage en général.
 
 ## Utilisation avec Docker
 
@@ -320,4 +332,5 @@ non de la qualité de la récupération.
 | Inscription | Ouverte en développement, **fermée par défaut en production** |
 | Clé JWT | Minimum 32 octets (RFC 7518) ; l'application refuse de démarrer en production avec la clé de développement |
 | Langue de la réponse | Consigne placée **en fin d'invite**, puis langue **réellement produite** vérifiée (`app/language.py`, comptage d'alphabet) et réécrite si besoin — la langue n'est pas laissée au bon vouloir du modèle |
+| Citations | L'ouvrage est nommé par son **titre** (`rag.etiquette_source`), jamais par son nom de fichier : « 12445.epub » ne désigne rien pour un lecteur. Un même ouvrage cité d'affilée n'est nommé qu'**une fois**. Le nom de fichier reste la clé d'identification (registre, index, jeu d'or) — ajouter ou renommer des ouvrages n'invalide donc aucune question du jeu d'or |
 | Sauvegardes | Archives horodatées + empreintes SHA-256 ; copie SQLite via l'API de sauvegarde (pas de « torn copy ») |
