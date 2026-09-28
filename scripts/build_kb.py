@@ -23,6 +23,7 @@ un disque non monté effacerait sinon un corpus entier sans qu'on l'ait demandé
 
 import argparse
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -39,6 +40,15 @@ from app.rag import get_ollama_client
 
 # Formats de documents reconnus par l'ingestion.
 FORMATS = (".pdf", ".epub")
+
+# Erreurs qui ne GUÉRIRONT PAS en réessayant : le fichier est illisible, ou la
+# configuration est incohérente. Réessayer ne ferait que perdre du temps.
+PERMANENTES = (epub.EpubError, ingest.IngestError)
+
+# Pause entre deux tentatives, en secondes, allongée à chaque reprise.
+# Un serveur d'embeddings distant qui redémarre a besoin de quelques secondes ;
+# insister immédiatement ne ferait qu'accumuler les échecs.
+PAUSE_REPRISE_S = 3.0
 
 
 def extract_arabic_pdf(pdf_path):
@@ -207,6 +217,37 @@ def ingerer_un_document(
     return resultat, note
 
 
+def ingerer_avec_reprises(
+    session, collection, chemin: Path, args
+) -> tuple[ingest.IngestResult, str]:
+    """Ingère un document, en réessayant les pannes PASSAGÈRES.
+
+    Une panne d'ingestion est souvent temporaire : un serveur d'embeddings
+    distant qui redémarre, une coupure réseau, un délai dépassé. Réessayer
+    coûte peu — le document est ré-ingéré de zéro, ce qui est sûr — alors que
+    ne pas réessayer oblige à relancer tout le passage.
+
+    Les erreurs PERMANENTES remontent immédiatement : le fichier est illisible
+    ou la configuration est incohérente, et aucune reprise n'y changera rien.
+
+    `args.retries` compte les REPRISES, pas les tentatives : 0 = une seule
+    tentative, 1 = deux tentatives au total.
+    """
+    for tentative in range(args.retries + 1):
+        try:
+            return ingerer_un_document(session, collection, chemin, args)
+        except PERMANENTES:
+            raise
+        except Exception:
+            if tentative == args.retries:
+                raise
+            print(f"⏳ reprise {tentative + 2}/{args.retries + 1} …", end=" ", flush=True)
+            time.sleep(PAUSE_REPRISE_S * (tentative + 1))
+
+    # Inatteignable : la boucle retourne ou relance à chaque tour.
+    raise AssertionError("boucle de reprise incohérente")
+
+
 def afficher_resume(resultats) -> None:
     """Récapitulatif d'un passage d'ingestion."""
     comptes = {statut: 0 for statut in ("added", "updated", "unchanged", "empty")}
@@ -223,6 +264,23 @@ def afficher_resume(resultats) -> None:
     )
     print(f"  {ecrits} chunk(s) écrit(s) au total")
     print(f"  Index : {config.CHROMA_DB_PATH}  ·  collection « {config.COLLECTION_NAME} »")
+    print("-" * 64)
+
+
+def afficher_echecs(echecs) -> None:
+    """Récapitulatif des documents en échec, à la fin d'un passage.
+
+    Rassembler les échecs en fin de course, plutôt que de s'arrêter au premier,
+    est ce qui rend un long passage exploitable : sur 1 000 documents, un seul
+    fichier illisible masquerait sinon l'état des 999 autres.
+    """
+    print()
+    print("-" * 64)
+    print(f"  ⚠️  {len(echecs)} document(s) en échec — NON inscrits au registre")
+    for nom, erreur in echecs:
+        print(f"     · {nom}")
+        print(f"       {type(erreur).__name__} : {erreur}")
+    print("  Ils seront repris au prochain passage : rien à rattraper à la main.")
     print("-" * 64)
 
 
@@ -350,6 +408,22 @@ def analyser_arguments() -> argparse.Namespace:
         help="affiche le registre et l'index, sans rien écrire",
     )
 
+    # Options de tenue d'un LONG passage. Sur 1 000 documents, un seul fichier
+    # illisible ne doit pas condamner les 999 autres, et une coupure réseau ne
+    # doit pas coûter la fin de la course.
+    analyseur.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="poursuit le passage malgré les échecs, et les récapitule à la fin",
+    )
+    analyseur.add_argument(
+        "--retries",
+        type=int,
+        default=1,
+        metavar="N",
+        help="reprises par document en cas de panne passagère (défaut 1)",
+    )
+
     # Ajouter et retirer s'excluent : demander les deux n'a aucun sens, et
     # argparse le refuse plutôt que d'en ignorer un en silence.
     actions = analyseur.add_mutually_exclusive_group()
@@ -368,6 +442,10 @@ def analyser_arguments() -> argparse.Namespace:
 
 def main() -> int:
     args = analyser_arguments()
+
+    if args.retries < 0:
+        print(f"❌ --retries {args.retries} est invalide : la valeur doit être >= 0.")
+        return 2
 
     # `--forget` passe AVANT tout le reste, pour deux raisons :
     #   · il ne dépend pas du corpus — retirer le dernier document d'un corpus
@@ -421,24 +499,41 @@ def main() -> int:
         return 1
 
     resultats = []
+    echecs = []
+    total = len(chemins)
+
     with Session(engine) as session:
-        for chemin in chemins:
-            print(f"📄 {chemin.name} …", end=" ", flush=True)
+        for rang, chemin in enumerate(chemins, start=1):
+            # Le compteur « i/N » n'est pas décoratif : sur un passage de
+            # plusieurs heures, ne pas savoir où l'on en est est le premier
+            # motif d'interrompre à tort.
+            print(f"[{rang}/{total}] 📄 {chemin.name} …", end=" ", flush=True)
             try:
-                resultat, note = ingerer_un_document(session, collection, chemin, args)
+                resultat, note = ingerer_avec_reprises(session, collection, chemin, args)
             except Exception as erreur:
-                print(f"❌ échec : {erreur}")
+                echecs.append((chemin.name, erreur))
+                print(f"❌ {type(erreur).__name__} : {erreur}")
                 print(
-                    "   Le document n'est PAS inscrit au registre : il sera repris "
-                    "au prochain passage."
+                    "   Document NON inscrit au registre : il sera repris au "
+                    "prochain passage."
                 )
-                return 1
+                if not args.continue_on_error:
+                    print(
+                        f"   Passage interrompu. « --continue-on-error » traiterait "
+                        f"les {total - rang} document(s) restant(s)."
+                    )
+                    return 1
+                continue
+
             resultats.append(resultat)
             print(resultat.libelle)
             if note:
                 print(f"   {note}")
 
     afficher_resume(resultats)
+    if echecs:
+        afficher_echecs(echecs)
+        return 1
     return 0
 
 
