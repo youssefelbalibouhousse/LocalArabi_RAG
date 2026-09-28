@@ -185,14 +185,21 @@ def ingerer_un_document(
     """Extrait, découpe et ingère un document, en ne refaisant que le nécessaire."""
     empreinte = ingest.fingerprint_file(chemin)
 
-    # Court-circuit AVANT l'extraction. La même comparaison existe dans
+    # Court-circuit AVANT l'extraction. La même décision existe dans
     # `ingest_document`, mais elle arrive trop tard : il aurait fallu relire
     # tout le document pour s'apercevoir qu'il n'avait pas changé. C'est
     # exactement ce que l'empreinte permet d'éviter.
+    #
+    # Les deux appellent le MÊME prédicat, et c'est volontaire : la comparaison
+    # porte sur le contenu ET sur le modèle d'embedding de l'index. Dupliquée,
+    # la condition aurait fini par ne plus dire la même chose aux deux endroits.
     if not args.force:
         ligne = ingest.registre_pour(session, chemin.name)
-        if ligne is not None and ligne.fingerprint == empreinte:
-            resultat = ingest.IngestResult(chemin.name, "unchanged", ligne.chunk_count, 0.0)
+        a_jour = ingest.deja_a_jour(ligne, collection, empreinte)
+        if a_jour is not None:
+            resultat = ingest.IngestResult(
+                chemin.name, "unchanged", a_jour.chunk_count, 0.0
+            )
             return resultat, ""
 
     metadonnees, pages, note = extraire(chemin)
@@ -309,22 +316,36 @@ def noms_en_double(chemins) -> list[str]:
 def afficher_etat(chemins, args) -> int:
     """Montre le registre face à l'index et au corpus, sans rien modifier.
 
-    Deux désaccords à surveiller, de sens opposés :
+    Trois désaccords à surveiller :
 
     · **écart** — le registre annonce des chunks que l'index ne contient plus :
       `chroma_db/` a été effacé ou remplacé, la base ne doit PAS être crue ;
     · **orphelin** — le registre connaît un document absent du corpus : ses
       chunks sont encore servis comme sources d'un fichier introuvable, et
       aucun passage d'ingestion ne les retirera, puisqu'il ne parcourt que le
-      corpus. Seul `--forget` les enlève.
+      corpus. Seul `--forget` les enlève ;
+    · **modèle divergent** — le document a été inscrit sous un autre modèle
+      d'embedding que celui de l'index : ses vecteurs ne sont pas prouvés, et
+      le passage suivant le ré-embarquera de lui-même.
+
+    Le modèle annoncé en tête est celui de l'INDEX, jamais celui du registre :
+    c'est l'index qui décide de la comparabilité des vecteurs. La colonne dit ce
+    que le registre raconte — les deux doivent coïncider, et c'est précisément
+    ce que la marque « modèle divergent » vérifie. Afficher la valeur du
+    registre sous un titre qui laisse croire à celle de l'index, c'est rassurer
+    à tort.
     """
     collection = rag.get_collection()
+    modele_index = ingest.modele_de_l_index(collection)
     sur_disque = {chemin.name for chemin in chemins}
 
-    print(f"{'document':<32}{'registre':>9}{'index':>8}   modèle d'embedding")
+    print(f"Index « {collection.name} » — modèle d'embedding : {modele_index}")
+    print()
+    print(f"{'document':<32}{'registre':>9}{'index':>8}   modèle inscrit au registre")
     print("-" * 76)
 
     ecart = False
+    divergence = False
     with Session(engine) as session:
         for chemin in chemins:
             ligne = ingest.registre_pour(session, chemin.name)
@@ -335,6 +356,9 @@ def afficher_etat(chemins, args) -> int:
             if attendu != reel:
                 ecart = True
                 marque = "  ⚠️ écart"
+            if ligne is not None and ligne.embedding_model != modele_index:
+                divergence = True
+                marque += "  ⚠️ modèle divergent"
             print(f"{chemin.name:<32}{attendu:>9}{reel:>8}   {modele}{marque}")
 
         orphelins = [
@@ -345,9 +369,13 @@ def afficher_etat(chemins, args) -> int:
 
     for ligne in orphelins:
         reel = ingest.compter_chunks(collection, ligne.source)
+        marque = "  ⚠️ orphelin"
+        if ligne.embedding_model != modele_index:
+            divergence = True
+            marque += " · modèle divergent"
         print(
             f"{ligne.source:<32}{ligne.chunk_count:>9}{reel:>8}   "
-            f"{ligne.embedding_model}  ⚠️ orphelin"
+            f"{ligne.embedding_model}{marque}"
         )
 
     print("-" * 76)
@@ -357,7 +385,12 @@ def afficher_etat(chemins, args) -> int:
     if orphelins:
         print("⚠️  Orphelin = inscrit au registre mais absent du corpus : ses chunks")
         print("   sont encore servis comme sources. Retirez-les avec --forget.")
-    if not ecart and not orphelins:
+    if divergence:
+        print(f"⚠️  « modèle divergent » : l'index est en « {modele_index} », mais ces")
+        print("   documents ont été inscrits sous un autre modèle. On ne peut donc pas")
+        print("   prouver que leurs vecteurs viennent du modèle courant.")
+        print("   Le prochain passage les ré-embarquera de lui-même : rien à faire à la main.")
+    if not ecart and not orphelins and not divergence:
         print("✅ Registre, index et corpus concordent.")
     return 0
 
@@ -497,6 +530,21 @@ def main() -> int:
     except ingest.EmbeddingModelMismatch as erreur:
         print(f"❌ {erreur}")
         return 1
+
+    # Une ré-ingestion causée par un changement de modèle n'est pas un défaut :
+    # c'est la seule réponse honnête, faute de pouvoir prouver que les vecteurs
+    # en place viennent du modèle courant. Mais elle doit être DITE — sinon un
+    # passage « qui n'aurait dû rien faire » re-embarque tout le corpus, et on
+    # cherche la panne là où il n'y en a pas.
+    with Session(engine) as session:
+        divergents = ingest.documents_au_modele_divergent(session, collection)
+    if divergents:
+        modele = ingest.modele_de_l_index(collection)
+        print(
+            f"⚠️  {len(divergents)} document(s) inscrit(s) sous un autre modèle que "
+            f"l'index (« {modele} ») : ils seront ré-embarqués."
+        )
+        print("   Sans cela, leurs vecteurs ne seraient pas comparables aux questions.")
 
     resultats = []
     echecs = []

@@ -112,6 +112,16 @@ def collection_embedding_model(collection) -> str | None:
     return meta.get("embedding_model")
 
 
+def modele_de_l_index(collection) -> str:
+    """Modèle d'embedding de l'index, avec repli sur la configuration.
+
+    Une collection antérieure aux métadonnées n'en porte pas : on retombe alors
+    sur `EMBEDDING_MODEL`, exactement comme le fait l'ingestion au moment
+    d'inscrire la ligne du registre.
+    """
+    return collection_embedding_model(collection) or config.EMBEDDING_MODEL
+
+
 def ensure_embedding_model(collection, model: str | None = None) -> str:
     """Vérifie (ou inscrit) le modèle d'embedding de la collection.
 
@@ -168,6 +178,50 @@ def documents_du_registre(session: Session) -> list[IngestedDocument]:
     """
     lignes = session.exec(select(IngestedDocument)).all()
     return sorted(lignes, key=lambda ligne: ligne.source)
+
+
+def deja_a_jour(
+    ligne: IngestedDocument | None, collection, fingerprint: str
+) -> IngestedDocument | None:
+    """Le registre PROUVE-t-il que ce document est déjà indexé, à jour ?
+
+    Renvoie la ligne du registre si — et seulement si — le CONTENU et le MODÈLE
+    d'embedding concordent. Sinon `None`, c'est-à-dire « à refaire ».
+
+    La seconde condition compte autant que la première. Un document dont le
+    registre annonce un autre modèle que l'index n'est PAS prouvé : le contenu
+    peut être identique et les vecteurs inconciliables, et ChromaDB ne dirait
+    rien — il ne compare que des nombres. Croire le registre sur parole, ce
+    serait se fier à l'étiquette plutôt qu'à la chose étiquetée.
+
+    Cette fonction existe pour être appelée aux DEUX endroits qui décident de
+    sauter un document : `ingest_document`, et le court-circuit de
+    `build_kb.ingerer_un_document` qui évite de relire un fichier entier. Deux
+    copies d'une même condition finissent toujours par diverger, et c'est
+    celle qu'on a oubliée qui laisse passer.
+    """
+    if ligne is None or ligne.fingerprint != fingerprint:
+        return None
+    if ligne.embedding_model != modele_de_l_index(collection):
+        return None
+    return ligne
+
+
+def documents_au_modele_divergent(
+    session: Session, collection
+) -> list[IngestedDocument]:
+    """Documents inscrits sous un autre modèle d'embedding que celui de l'index.
+
+    Non vide, cet ensemble annonce une ré-ingestion : le passage suivant
+    re-embarquera ces documents, faute de pouvoir prouver que leurs vecteurs
+    viennent du modèle courant.
+    """
+    modele = modele_de_l_index(collection)
+    return [
+        ligne
+        for ligne in documents_du_registre(session)
+        if ligne.embedding_model != modele
+    ]
 
 
 # --- Écriture dans l'index ------------------------------------------------
@@ -266,8 +320,9 @@ def ingest_document(
     debut = time.perf_counter()
 
     ligne = registre_pour(session, source)
-    if not force and ligne is not None and ligne.fingerprint == fingerprint:
-        return IngestResult(source, "unchanged", ligne.chunk_count, 0.0)
+    a_jour = deja_a_jour(ligne, collection, fingerprint)
+    if not force and a_jour is not None:
+        return IngestResult(source, "unchanged", a_jour.chunk_count, 0.0)
 
     if not chunks:
         # Un document vide ne doit pas non plus laisser de trace : sinon il
