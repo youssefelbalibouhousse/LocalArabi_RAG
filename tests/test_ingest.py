@@ -17,6 +17,7 @@ Comme pour le reste de la suite, aucun test ne touche à la vraie base, à
 import pytest
 
 from app import config, ingest
+from app.models import IngestedDocument
 
 
 class CollectionFactice:
@@ -26,7 +27,8 @@ class CollectionFactice:
     que les tests puissent vérifier le COMPORTEMENT et pas seulement le résult.
     """
 
-    def __init__(self, embedding_model: str | None = None):
+    def __init__(self, embedding_model: str | None = None, name: str | None = None):
+        self.name = name or config.COLLECTION_NAME
         self.metadata = {"embedding_model": embedding_model} if embedding_model else {}
         self.chunks: dict[str, tuple[str, dict]] = {}
         self.tailles_des_lots: list[int] = []
@@ -260,6 +262,64 @@ def test_force_re_ingere_meme_un_document_inchange(session, collection):
     )
 
     assert resultat.status == "updated"
+
+
+def forcer_modele_du_registre(session, source: str, modele: str) -> None:
+    """Réécrit le modèle d'embedding inscrit au registre pour un document.
+
+    Reproduit ce qu'un passage lancé avec un autre `EMBEDDING_MODEL` laisse
+    derrière lui : le registre raconte alors ce que l'INDEX n'a jamais été.
+    """
+    ligne = ingest.registre_pour(session, source)
+    ligne.embedding_model = modele
+    session.add(ligne)
+    session.commit()
+
+
+def test_deja_a_jour_refuse_un_modele_divergent(session, collection):
+    """Le contenu seul ne prouve rien : les vecteurs doivent venir du bon modèle."""
+    ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau()]
+    )
+    ligne = ingest.registre_pour(session, "a.pdf")
+
+    assert ingest.deja_a_jour(ligne, collection, "v1") is not None
+
+    forcer_modele_du_registre(session, "a.pdf", "qwen3-embedding:0.6b")
+
+    assert ingest.deja_a_jour(ligne, collection, "v1") is None
+
+
+def test_un_document_au_modele_divergent_est_re_ingere(session, collection):
+    """Un registre et un index qui se contredisent ne se départagent pas par la
+    confiance : on ré-embarque plutôt que de croire l'étiquette."""
+    ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau("ancien")]
+    )
+    forcer_modele_du_registre(session, "a.pdf", "qwen3-embedding:0.6b")
+    collection.tailles_des_lots.clear()
+
+    resultat = ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau("nouveau")]
+    )
+
+    assert resultat.status == "updated"
+    assert collection.tailles_des_lots == [1]
+    assert ingest.registre_pour(session, "a.pdf").embedding_model == config.EMBEDDING_MODEL
+
+
+def test_documents_au_modele_divergent_ne_liste_que_les_ecarts(session, collection):
+    ingest.ingest_document(
+        session, collection, source="a.pdf", fingerprint="v1", chunks=[morceau()]
+    )
+    session.add(IngestedDocument(
+        source="b.pdf", fingerprint="v1", chunk_count=1, embedding_model="autre-modele"
+    ))
+    session.commit()
+
+    divergents = ingest.documents_au_modele_divergent(session, collection)
+
+    assert [ligne.source for ligne in divergents] == ["b.pdf"]
 
 
 def test_un_document_sans_texte_ne_laisse_aucune_trace(session, collection):

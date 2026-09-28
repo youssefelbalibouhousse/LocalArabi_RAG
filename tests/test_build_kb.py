@@ -254,6 +254,28 @@ def test_un_epub_sans_texte_est_ingere_vide(tmp_path, session):
     assert collection.chunks == {}
 
 
+def test_un_epub_au_modele_divergent_est_re_extrait(tmp_path, session):
+    """Le court-circuit AVANT extraction ne doit pas sauter un document dont les
+    vecteurs ne sont plus justifiés : sans cela, un changement de modèle
+    laisserait des vecteurs inconciliables en place, sans le moindre signal."""
+    chemin = ecrire_epub(tmp_path / "livre.epub", [("P1", "الصفحة: 1", "نص")])
+    collection = CollectionFactice(embedding_model=config.EMBEDDING_MODEL)
+
+    premier, _ = build_kb.ingerer_un_document(session, collection, chemin, args())
+    assert premier.status == "added"
+
+    ligne = ingest.registre_pour(session, "livre.epub")
+    ligne.embedding_model = "qwen3-embedding:0.6b"
+    session.add(ligne)
+    session.commit()
+    collection.tailles_des_lots.clear()
+
+    second, _ = build_kb.ingerer_un_document(session, collection, chemin, args())
+
+    assert second.status == "updated"
+    assert collection.tailles_des_lots == [1]
+
+
 # --- Retrait d'un document du corpus --------------------------------------
 
 @pytest.fixture(name="index")
@@ -279,6 +301,20 @@ def indexer(collection, source: str, morceaux: int = 1) -> None:
         ingest.ingest_document(
             session, collection, source=source, fingerprint="v1", chunks=chunks
         )
+
+
+def signaler_modele_divergent(source: str, modele: str = "qwen3-embedding:0.6b") -> None:
+    """Réécrit le modèle d'embedding inscrit au registre pour un document.
+
+    Reproduit l'état que laisse un passage d'essai lancé avec un autre
+    `EMBEDDING_MODEL` : la ligne du registre raconte un modèle que l'INDEX n'a
+    jamais utilisé — alors que les vecteurs, eux, n'ont pas bougé.
+    """
+    with Session(build_kb.engine) as session:
+        ligne = ingest.registre_pour(session, source)
+        ligne.embedding_model = modele
+        session.add(ligne)
+        session.commit()
 
 
 def test_forget_retire_le_document_de_l_index_et_du_registre(index, tmp_path, monkeypatch):
@@ -373,6 +409,45 @@ def test_status_ne_signale_pas_d_orphelin_quand_tout_est_la(
     assert "orphelin" not in capsys.readouterr().out
 
 
+def test_status_signale_une_ligne_de_registre_incoherente(
+    index, tmp_path, monkeypatch, capsys
+):
+    """Découvert sur le corpus réel : un essai avec un autre modèle avait laissé
+    le registre annonçant `qwen3-embedding:0.6b` alors que l'index était en
+    `bge-m3`. `--status` affichait « concordent » — il rassurait à tort."""
+    (tmp_path / "cours.pdf").write_bytes(b"%PDF-1.4 faux")
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    monkeypatch.setattr(build_kb, "create_db_and_tables", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["build_kb.py", "--status"])
+    indexer(index, "cours.pdf")
+    signaler_modele_divergent("cours.pdf")
+
+    assert build_kb.main() == 0
+
+    sortie = capsys.readouterr().out
+    # Le modèle annoncé en tête est celui de l'INDEX…
+    assert f"modèle d'embedding : {config.EMBEDDING_MODEL}" in sortie
+    # …et la ligne du registre dit le sien, pour que l'écart soit visible.
+    assert "qwen3-embedding:0.6b" in sortie
+    assert "modèle divergent" in sortie
+    assert "concordent" not in sortie
+
+
+def test_status_reste_muet_quand_tout_concorde(index, tmp_path, monkeypatch, capsys):
+    """Le bruit tue le signal : un état sain ne doit rien signaler du tout."""
+    (tmp_path / "cours.pdf").write_bytes(b"%PDF-1.4 faux")
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    monkeypatch.setattr(build_kb, "create_db_and_tables", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["build_kb.py", "--status"])
+    indexer(index, "cours.pdf")
+
+    assert build_kb.main() == 0
+
+    sortie = capsys.readouterr().out
+    assert "concordent" in sortie
+    assert "⚠️" not in sortie
+
+
 # --- Tenue d'un long passage ----------------------------------------------
 
 def preparer_passage(monkeypatch, tmp_path, *options: str) -> None:
@@ -394,6 +469,22 @@ def test_un_document_qui_passe_du_premier_coup_n_est_pas_reessaye(
         resultat, _ = build_kb.ingerer_avec_reprises(session, index, chemin, args())
 
     assert resultat.status == "added"
+
+
+def test_le_passage_annonce_les_documents_au_modele_divergent(
+    index, tmp_path, monkeypatch, capsys
+):
+    """Une ré-ingestion que rien ne laissait prévoir doit être DITE, et avant :
+    sinon on cherche la panne là où il n'y en a pas."""
+    chemin = ecrire_epub(tmp_path / "livre.epub", [("P1", "الصفحة: 1", "نص")])
+    preparer_passage(monkeypatch, tmp_path)
+    with Session(build_kb.engine) as session:
+        build_kb.ingerer_un_document(session, index, chemin, args())
+    signaler_modele_divergent("livre.epub")
+
+    assert build_kb.main() == 0
+
+    assert "seront ré-embarqués" in capsys.readouterr().out
 
 
 def test_une_panne_passagere_est_reessayee(index, tmp_path, monkeypatch):
