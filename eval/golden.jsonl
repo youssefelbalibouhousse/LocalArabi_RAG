@@ -23,7 +23,16 @@
 #   # écrivez une question par extrait ci-dessous, puis :
 #   python scripts/eval_rag.py --run --label baseline
 #
-# --- 36 questions sur 12445.epub, toutes en « draft » ----------------------
+# --- 37 questions sur 12445.epub : 36 en arabe, 1 en français ---------------
+#
+# La question q037 est posée en FRANÇAIS à dessein. bge-m3 est multilingue : une
+# question française peut retrouver un passage arabe sans traduction. C'est une
+# propriété à vérifier, pas à supposer — et elle conditionne l'usage réel, où
+# un testeur francophone interrogera le corpus en français.
+#
+# ⚠️ Conséquence sur la lecture du score : hit@k mélange alors récupération
+#    monolingue et interlingue. Pour les séparer, comparer deux labels, l'un
+#    avec les questions françaises, l'autre sans.
 #
 # Corpus : الإجماع لابن المنذر (Shamela, ouvrage 12445), 144 pages imprimées.
 # Le livre est une suite de questions numérotées (المسائل) groupées par
@@ -47,12 +56,15 @@
 #
 # --- Vérification des pages attendues --------------------------------------
 #
-# Les 36 pages attendues ont été VÉRIFIÉES, pas supposées : pour chaque
+# Les 37 pages attendues ont été VÉRIFIÉES, pas supposées : pour chaque
 # question, le numéro de la مسألة cité dans la note a été recherché dans les
 # 144 pages du texte. Il n'apparaît que sur la page attendue — sauf pour
 # q004 à q008, où le même nombre existe aussi dans l'index des sources
 # (p. 143-154), dont les entrées sont numérotées de 1 à ~130. Collision de
 # numérotation propre au livre, pas erreur de ce fichier.
+#
+# La page de q037 (p. 81) est celle de la question arabe q019 : elle est
+# vérifiée par le même moyen, seule la langue de la question change.
 #
 # La promotion en « validated » reste néanmoins une LECTURE humaine : une
 # recherche prouve qu'une page contient le passage, pas qu'il répond à la
@@ -93,3 +105,4 @@
 {"id": "q034", "question": "هل تحمل العاقلة دية القتل العمد؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 126}], "notes": "705 - وأجمعوا على أن العاقلة لا تحمل دية العمد، وأنها تحمل دية الخطأ."}
 {"id": "q035", "question": "ماذا يحدث إذا ملك الرجل أبويه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 129}], "notes": "727 - وأجمعوا أن الرجل إذا ملك أبويه... أنهم يعتقون عليه ساعة تملكهم."}
 {"id": "q036", "question": "متى تجب قسمة الأرض بين الشركاء؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 132}], "notes": "750 - الأرض إذا كانت بين شركاء، واحتملت القسمة عن غير ضرر يلحق أحدا منهم: قسمت."}
+{"id": "q037", "question": "Peut-on épouser la tante de son épouse ?", "lang": "fr", "status": "draft", "expected": [{"source": "12445.epub", "page": 81}], "notes": "Issue 370 (ص 81) : « وأجمعوا على أن لا تنكح المرأة على عمتها. ولا على خالتها ». Choix mesuré : parmi 8 questions françaises testées, c'est la seule classée rang 1 (les 7 autres : rangs 2 à 6, toutes dans le top-10)."}
