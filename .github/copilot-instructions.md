@@ -34,6 +34,7 @@ venv\Scripts\Activate.ps1              # environnement virtuel
 pip install -r requirements-dev.txt    # deps + outils de test
 uvicorn app.main:app --reload          # lancer en local
 venv\Scripts\python.exe -m pytest      # suite de tests (doit rester verte)
+python scripts/benchmark_embeddings.py  # débit de l'endpoint d'embeddings
 docker compose up -d --build           # lancer en conteneurs
 python scripts/backup.py               # sauvegarder les données
 python scripts/schedule_backup.py --status   # la sauvegarde auto est-elle planifiée ?
@@ -77,6 +78,20 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   `ingest.purger_document()` efface le registre **avant** l'index — même ordre
   que l'ingestion, même raison. `--forget` ne vérifie pas Ollama : supprimer
   n'embarque rien.
+- **`build_kb.py` doit TENIR un long passage, pas le subir.** Sans
+  `--continue-on-error`, `main()` s'arrête au PREMIER échec : sur 1 000
+  documents, un seul fichier illisible laisse les suivants non traités. Le
+  compteur « i/N » et le récapitulatif d'échecs ne sont pas décoratifs — sur un
+  passage de plusieurs heures, ce sont eux qui rendent l'avancement lisible.
+  `ingerer_avec_reprises()` réessaie les pannes passagères (réseau, redémarrage)
+  mais **jamais** `PERMANENTES` (`epub.EpubError`, `ingest.IngestError`) :
+  réessayer un fichier illisible ne fait que perdre du temps.
+- **Mesurer un débit AVANT de louer une machine.** `scripts/benchmark_embeddings.py`
+  donne les chunks/s, la dimension des vecteurs, et vérifie la marge entre
+  `INGEST_BATCH_SIZE × ms/chunk` et `EMBEDDING_TIMEOUT` (il sort en code 1 si
+  elle est insuffisante). Il **préchauffe** avant de mesurer : le premier appel
+  charge le modèle — 3,9 s pour un seul texte à froid, contre 0,4 s ensuite —
+  et la mesure décrirait le chargement au lieu du débit.
 - **Un seul modèle d'embedding par index** : `ensure_embedding_model()` inscrit le
   modèle dans les métadonnées de la collection et **refuse** tout écart. Sans ce
   refus, changer `EMBEDDING_MODEL` produirait des résultats faux en silence.

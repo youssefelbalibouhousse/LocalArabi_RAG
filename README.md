@@ -25,11 +25,12 @@ frontend/
 ├── css/input.css    # SOURCE de la feuille de styles — à modifier
 └── app.css          # Feuille COMPILÉE (non versionnée)
 scripts/
-├── build_kb.py          # Ingestion des PDF → base vectorielle
-├── eval_rag.py          # Évaluation de la récupération (jeu d'or, mesures)
-├── backup.py            # Sauvegarde + vérification + restauration
-├── schedule_backup.py   # Sauvegarde quotidienne automatique
-└── create_user.py       # Création d'un compte en ligne de commande
+├── build_kb.py              # Ingestion des documents (PDF, EPUB) → base vectorielle
+├── benchmark_embeddings.py  # Débit de l'endpoint d'embeddings, avant de payer
+├── eval_rag.py              # Évaluation de la récupération (jeu d'or, mesures)
+├── backup.py                # Sauvegarde + vérification + restauration
+├── schedule_backup.py       # Sauvegarde quotidienne automatique
+└── create_user.py           # Création d'un compte en ligne de commande
 eval/
 ├── golden.jsonl         # Jeu d'or : questions de référence (versionné)
 └── results/             # Rapports de mesure (non versionnés)
@@ -117,12 +118,56 @@ Optionnel : copier `.env.example` en `.env` pour surcharger la configuration.
    demandé. Tant que le document reste au registre, `--status` le signale comme
    **orphelin** — ses chunks sont encore servis comme sources d'un fichier que
    plus personne ne peut ouvrir.
+
+   **Sur un long passage** (des centaines de documents, ou un serveur
+   d'embeddings distant), deux options évitent de tout recommencer :
+
+   ```bash
+   python scripts/build_kb.py --continue-on-error      # ne s'arrête pas au 1er échec
+   python scripts/build_kb.py --retries 2              # réessaie les pannes passagères
+   ```
+
+   `--continue-on-error` traite les documents suivants malgré les échecs, puis
+   les récapitule à la fin — un seul fichier illisible ne condamne pas les 999
+   autres. `--retries` réessaie une panne **passagère** (coupure réseau, serveur
+   qui redémarre) mais **jamais** une erreur permanente (fichier illisible,
+   configuration incohérente) : réessayer n'y changerait rien. Un document en
+   échec n'est pas inscrit au registre, donc le passage suivant le reprend.
 3. **Lancer l'API** :
    ```bash
    uvicorn app.main:app --reload
    ```
 4. **Interroger** : `http://localhost:8000/ask?question=<votre question>`
    ou ouvrir `frontend/index.html`.
+
+## Mesurer le débit d'embeddings
+
+Louer une machine GPU se paie à l'heure : mieux vaut savoir ce qu'elle rend
+avant de signer. Ce script mesure le débit de l'endpoint configuré, la dimension
+des vecteurs produits, et **vérifie la cohérence** de la configuration.
+
+```bash
+python scripts/benchmark_embeddings.py
+python scripts/benchmark_embeddings.py --total 390000     # projeter 1 000 livres
+python scripts/benchmark_embeddings.py --taille-lot 64    # éprouver un autre lot
+```
+
+Un lot part en **une seule** requête d'embedding : si son temps de calcul
+dépasse `EMBEDDING_TIMEOUT`, l'écriture échoue sur un « timed out in add » qui
+ne dit ni le lot, ni le délai, ni la cause. Le script refuse une marge faible et
+sort en code 1 — utilisable dans un script d'automatisation.
+
+Valeurs mesurées ici, sur un i7-1165G7 **sans GPU dédié** (`bge-m3`, chunks de
+~520 caractères, ~2,2 chunk/s) :
+
+| Corpus | Chunks | Durée mesurée |
+|---|---|---|
+| 1 livre | 390 | 3 min |
+| 100 livres | 39 000 | 4,8 h |
+| 1 000 livres | 390 000 | 2 jours |
+| 8 000 livres | 3,1 M | 16 jours |
+
+C'est ce chiffre — pas une intuition — qui décide d'une location de GPU.
 
 ## Exemple de réponse
 
@@ -268,6 +313,7 @@ non de la qualité de la récupération.
 | Configuration | `app/config.py` est la **source unique de vérité**, surchargeable par variables d'environnement |
 | Ingestion | **Incrémentale et non destructive** : empreinte SHA-256 du contenu, remplacement par document, écriture par lots bornés. Registre dans `data/app.db`. Un index refuse de mélanger deux modèles d'embedding. |
 | Retrait | **Explicite** (`--forget`) et jamais automatique : un fichier disparu du disque n'est pas retiré pour autant. La purge efface le registre **avant** l'index, comme l'ingestion, pour qu'une panne laisse le document repris plutôt qu'inscrit à tort. |
+| Passages longs | `--continue-on-error` poursuit malgré les échecs et les récapitule ; `--retries` réessaie les pannes passagères (réseau, redémarrage), jamais les erreurs permanentes |
 | Formats | PDF (`pypdf`) et EPUB (`app/epub.py`), ramenés à la **même forme** en sortie : `chunk_pages` et toute la chaîne traitent les deux sans distinction |
 | Taille des lots | `INGEST_BATCH_SIZE` (32 par défaut) et `EMBEDDING_TIMEOUT` (120 s) se lisent **ensemble** : un lot est embarqué en une seule requête. Mesuré ici : ~0,55 s par chunk, donc 256 chunks dépassaient le délai de 60 s de la bibliothèque — l'écriture échouait en « timed out in add » |
 | Fournisseur LLM | `LLM_PROVIDER=ollama` (auto-hébergé) ou `openai` (Groq, Together, vLLM…) |

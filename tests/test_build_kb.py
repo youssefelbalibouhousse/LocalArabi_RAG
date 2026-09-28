@@ -20,12 +20,21 @@ from sqlmodel import Session
 from test_epub import ecrire_epub
 from test_ingest import CollectionFactice
 
-from app import config, ingest
+from app import config, epub, ingest
 
 
-def args(force: bool = False) -> argparse.Namespace:
+def args(
+    force: bool = False, retries: int = 1, continue_on_error: bool = False
+) -> argparse.Namespace:
     """Les options telles que `argparse` les fournit au script."""
-    return argparse.Namespace(force=force, only=None, forget=None, status=False)
+    return argparse.Namespace(
+        force=force,
+        only=None,
+        forget=None,
+        status=False,
+        retries=retries,
+        continue_on_error=continue_on_error,
+    )
 
 
 # --- Collecte des documents -----------------------------------------------
@@ -362,3 +371,113 @@ def test_status_ne_signale_pas_d_orphelin_quand_tout_est_la(
 
     assert build_kb.main() == 0
     assert "orphelin" not in capsys.readouterr().out
+
+
+# --- Tenue d'un long passage ----------------------------------------------
+
+def preparer_passage(monkeypatch, tmp_path, *options: str) -> None:
+    """Branche `main()` sur un faux corpus, sans base réelle ni Ollama."""
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    monkeypatch.setattr(build_kb, "create_db_and_tables", lambda: None)
+    monkeypatch.setattr(build_kb, "check_ollama", lambda: True)
+    monkeypatch.setattr(build_kb, "PAUSE_REPRISE_S", 0)  # pas d'attente en test
+    monkeypatch.setattr(sys, "argv", ["build_kb.py", *options])
+
+
+def test_un_document_qui_passe_du_premier_coup_n_est_pas_reessaye(
+    index, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(build_kb, "PAUSE_REPRISE_S", 0)
+    chemin = ecrire_epub(tmp_path / "livre.epub", [("P1", "الصفحة: 1", "نص")])
+
+    with Session(build_kb.engine) as session:
+        resultat, _ = build_kb.ingerer_avec_reprises(session, index, chemin, args())
+
+    assert resultat.status == "added"
+
+
+def test_une_panne_passagere_est_reessayee(index, tmp_path, monkeypatch):
+    """Une coupure réseau sur un endpoint distant ne doit pas coûter un document."""
+    monkeypatch.setattr(build_kb, "PAUSE_REPRISE_S", 0)
+    chemin = ecrire_epub(tmp_path / "livre.epub", [("P1", "الصفحة: 1", "نص")])
+    index.echouer_au_prochain_add = True  # la PREMIÈRE tentative échoue
+
+    with Session(build_kb.engine) as session:
+        resultat, _ = build_kb.ingerer_avec_reprises(session, index, chemin, args(retries=1))
+
+    assert resultat.status == "added"
+    assert index.chunks != {}
+
+
+def test_aucune_reprise_quand_retries_vaut_zero(index, tmp_path, monkeypatch):
+    monkeypatch.setattr(build_kb, "PAUSE_REPRISE_S", 0)
+    chemin = ecrire_epub(tmp_path / "livre.epub", [("P1", "الصفحة: 1", "نص")])
+    index.echouer_au_prochain_add = True
+
+    with (
+        Session(build_kb.engine) as session,
+        pytest.raises(RuntimeError, match="panne simulée"),
+    ):
+        build_kb.ingerer_avec_reprises(session, index, chemin, args(retries=0))
+
+
+def test_une_erreur_permanente_n_est_pas_reessayee(index, tmp_path, monkeypatch):
+    """Réessayer un fichier illisible ne ferait que perdre du temps."""
+    monkeypatch.setattr(build_kb, "PAUSE_REPRISE_S", 0)
+    chemin = tmp_path / "menteur.epub"
+    chemin.write_bytes(b"ceci n'est pas une archive")
+
+    appels = []
+    vraie_extraction = build_kb.extraire
+
+    def extraire_en_comptant(chemin_a_lire):
+        appels.append(chemin_a_lire)
+        return vraie_extraction(chemin_a_lire)
+
+    monkeypatch.setattr(build_kb, "extraire", extraire_en_comptant)
+
+    with (
+        Session(build_kb.engine) as session,
+        pytest.raises(epub.EpubError, match="archive ZIP"),
+    ):
+        build_kb.ingerer_avec_reprises(session, index, chemin, args(retries=2))
+
+    assert len(appels) == 1, "une erreur permanente ne doit être tentée qu'une fois"
+
+
+def test_afficher_echecs_liste_les_documents(capsys):
+    build_kb.afficher_echecs([("a.epub", ValueError("cassé")), ("b.epub", RuntimeError("réseau"))])
+
+    sortie = capsys.readouterr().out
+    assert "a.epub" in sortie
+    assert "b.epub" in sortie
+    assert "2 document(s) en échec" in sortie
+
+
+def test_continue_on_error_traite_les_documents_suivants(
+    index, tmp_path, monkeypatch, capsys
+):
+    """Sur 1 000 documents, un seul fichier illisible ne doit pas condamner les autres."""
+    (tmp_path / "aaa.epub").write_bytes(b"ceci n'est pas une archive")
+    ecrire_epub(tmp_path / "zzz.epub", [("P1", "الصفحة: 1", "نص")])
+    preparer_passage(monkeypatch, tmp_path, "--continue-on-error", "--retries", "0")
+
+    code = build_kb.main()
+
+    assert code == 1, "un échec reste un échec : il doit être signalé"
+    sortie = capsys.readouterr().out
+    assert "aaa.epub" in sortie
+    assert "zzz.epub" in sortie
+    assert index.chunks != {}, "le document suivant devait être traité"
+
+
+def test_sans_continue_on_error_le_passage_s_arrete_au_premier_echec(
+    index, tmp_path, monkeypatch
+):
+    """Le comportement par défaut reste prudent : on s'arrête et on le dit."""
+    (tmp_path / "aaa.epub").write_bytes(b"ceci n'est pas une archive")
+    ecrire_epub(tmp_path / "zzz.epub", [("P1", "الصفحة: 1", "نص")])
+    preparer_passage(monkeypatch, tmp_path, "--retries", "0")
+
+    assert build_kb.main() == 1
+    assert index.chunks == {}, "sans l'option, le document suivant ne doit pas être traité"
