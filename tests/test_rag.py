@@ -58,6 +58,18 @@ def test_chunk_pages_produit_des_intervalles_de_lignes_contigus():
 
 SOURCE = [{"source": "a.pdf", "page": 5, "line_start": 1, "line_end": 9}]
 
+# Un ouvrage qui PORTE un titre : la seule mention qu'un lecteur peut retrouver
+# dans son exemplaire. « 12445.epub » ne désigne rien pour personne.
+SOURCE_TITREE = [
+    {
+        "source": "12445.epub",
+        "title": "الاعتكاف",
+        "page": 81,
+        "line_start": 1,
+        "line_end": 5,
+    }
+]
+
 
 def test_format_sources_en_francais():
     assert rag.format_sources(SOURCE, "fr") == "a.pdf — page 5 (lignes 1-9)"
@@ -74,6 +86,92 @@ def test_format_sources_accepte_une_source_sans_nom_de_fichier():
     sans_fichier = [{"source": None, "page": 2, "line_start": 1, "line_end": 3}]
 
     assert rag.format_sources(sans_fichier, "fr") == "page 2 (lignes 1-3)"
+
+
+def test_format_sources_prefere_le_titre_au_nom_de_fichier():
+    """La citation doit nommer l'OUVRAGE, pas le fichier."""
+    resultat = rag.format_sources(SOURCE_TITREE, "fr")
+
+    assert resultat == "الاعتكاف — page 81 (lignes 1-5)"
+    assert "12445.epub" not in resultat
+
+
+def test_un_titre_blanc_ne_masque_pas_le_nom_de_fichier():
+    """Un titre vide n'est pas un titre : sans ce repli, la citation perdrait
+    toute référence utilisable."""
+    sans_titre = [
+        {"source": "a.pdf", "title": "   ", "page": 5, "line_start": 1, "line_end": 9}
+    ]
+
+    assert rag.format_sources(sans_titre, "fr") == "a.pdf — page 5 (lignes 1-9)"
+
+
+def test_un_meme_ouvrage_cite_d_affilee_ne_se_nomme_qu_une_fois():
+    """Sinon cinq passages du même livre répètent cinq fois un titre qui peut
+    faire quarante caractères, et la référence devient illisible."""
+    memes = [
+        {"source": "a.epub", "title": "Livre", "page": 15, "line_start": 1, "line_end": 3},
+        {"source": "a.epub", "title": "Livre", "page": 15, "line_start": 4, "line_end": 8},
+    ]
+
+    resultat = rag.format_sources(memes, "fr")
+
+    assert resultat == "Livre — page 15 (lignes 1-3), page 15 (lignes 4-8)"
+    assert resultat.count("Livre") == 1
+
+
+def test_le_nom_revient_quand_l_ouvrage_change():
+    """Sans ce retour, on ne saurait plus de quel livre parle le passage."""
+    melange = [
+        {"source": "a.epub", "title": "Livre A", "page": 1, "line_start": 1, "line_end": 2},
+        {"source": "b.epub", "title": "Livre B", "page": 2, "line_start": 1, "line_end": 2},
+        {"source": "a.epub", "title": "Livre A", "page": 3, "line_start": 1, "line_end": 2},
+    ]
+
+    resultat = rag.format_sources(melange, "fr")
+
+    assert resultat == (
+        "Livre A — page 1 (lignes 1-2), Livre B — page 2 (lignes 1-2), "
+        "Livre A — page 3 (lignes 1-2)"
+    )
+
+
+class _FakeCollection:
+    """Collection minimale : `query` rend ce qu'on lui a préparé."""
+
+    def __init__(self, documents, metadatas, distances=None):
+        self._resultat = {
+            "documents": [documents],
+            "metadatas": [metadatas],
+            "distances": [distances or [0.1] * len(documents)],
+        }
+
+    def query(self, **kwargs):
+        return self._resultat
+
+
+def test_retrieve_transmet_le_titre_de_l_ouvrage():
+    """`format_sources` ne peut pas inventer un titre qu'on ne lui a pas donné :
+    si `retrieve` l'oublie, la citation retombe sur le nom de fichier sans que
+    rien ne le signale."""
+    collection = _FakeCollection(
+        documents=["texte"],
+        metadatas=[
+            {
+                "source": "12445.epub",
+                "title": "الاعتكاف",
+                "page": 81,
+                "line_start": 1,
+                "line_end": 5,
+            }
+        ],
+    )
+
+    docs, sources = rag.retrieve(collection, "سؤال")
+
+    assert docs == ["texte"]
+    assert sources[0]["title"] == "الاعتكاف"
+    assert sources[0]["source"] == "12445.epub"
 
 
 # --- Formatage des extraits ----------------------------------------------

@@ -5,6 +5,7 @@ pour éviter toute duplication de configuration.
 """
 
 import logging
+from collections.abc import Mapping
 
 import chromadb
 import ollama
@@ -91,7 +92,9 @@ def retrieve(collection, question, n_results=None):
     """Récupère les chunks les plus proches de la question.
 
     Retourne (docs, sources) où chaque source contient le fichier d'origine,
-    la page et l'intervalle de lignes.
+    son titre, la page et l'intervalle de lignes. Le titre sert à NOMMER
+    l'ouvrage dans la citation (voir `etiquette_source`) ; le nom de fichier
+    reste la clé d'identification.
     """
     if n_results is None:
         n_results = config.N_RESULTS
@@ -118,7 +121,11 @@ def retrieve(collection, question, n_results=None):
             continue
         filtered_docs.append(doc)
         sources.append({
+            # `source` (le nom de fichier) reste la CLÉ : c'est lui que le
+            # registre, l'index et le jeu d'or connaissent. `title` n'est là que
+            # pour l'AFFICHAGE, et il peut manquer — un PDF n'en apporte pas.
             "source": meta.get("source"),
+            "title": meta.get("title"),
             "page": meta.get("page"),
             "line_start": meta.get("line_start"),
             "line_end": meta.get("line_end"),
@@ -282,15 +289,43 @@ def answer_question(question, context, language="ar"):
     return answer
 
 
+def etiquette_source(source: Mapping) -> str:
+    """Comment NOMMER un ouvrage dans une citation.
+
+    Le **titre**, quand on le connaît : c'est la seule mention qu'un lecteur peut
+    retrouver dans son exemplaire. Le nom du fichier n'est qu'un repli — un PDF
+    n'apporte pas de titre fiable (`pypdf` n'en rend pas), et « 12445.epub » ne
+    désigne rien pour personne.
+
+    Le nom de fichier reste la CLÉ d'identification partout ailleurs (registre,
+    index, jeu d'or) : cette fonction ne change que ce qui est MONTRÉ. C'est
+    exactement ce qui permet d'ajouter vingt ouvrages, ou d'en renommer un, sans
+    invalider les questions de référence.
+    """
+    titre = (source.get("title") or "").strip()
+    return titre or source.get("source") or ""
+
+
 def format_sources(sources, language="ar"):
     """Construit la mention des sources dans la langue demandée.
 
-    Arabe : « fichier — صفحة X (الأسطر a-b) »
-    Français : « fichier — page X (lignes a-b) »
+    Arabe : « ouvrage — صفحة X (الأسطر a-b) »
+    Français : « ouvrage — page X (lignes a-b) »
+
+    L'ouvrage est nommé par son titre quand on le connaît (voir
+    `etiquette_source`).
     """
     parts = []
+    precedent = None
     for s in sources:
-        prefix = f"{s['source']} — " if s.get("source") else ""
+        nom = etiquette_source(s)
+        # Un même ouvrage cité d'affilée ne se nomme qu'UNE fois : sans cela,
+        # cinq passages du même livre répètent cinq fois un titre qui peut faire
+        # quarante caractères, et la référence devient illisible. Dès que
+        # l'ouvrage change, le nom revient — sinon on ne saurait plus de quel
+        # livre parle le passage.
+        prefix = f"{nom} — " if nom and nom != precedent else ""
+        precedent = nom
         if language == "fr":
             parts.append(
                 f"{prefix}page {s['page']} (lignes {s['line_start']}-{s['line_end']})"
