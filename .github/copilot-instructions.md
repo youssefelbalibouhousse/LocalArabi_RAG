@@ -165,8 +165,8 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   et le choix de police, jamais par l'espacement des lettres.
 - **Recherche hybride** : `rag.retrieve()` mène une recherche vectorielle **et** une
   recherche lexicale (BM25), puis les **fusionne par rangs réciproques** (`app/lexical.py`).
-  Mesuré sur 59 questions : `hit@10` 76,3 % → **89,8 %**, 20 questions mieux classées,
-  1 moins bien, **latence inchangée**. Pourquoi : dans `تفسير ابن المنذر`, 85 % des
+  Mesuré sur 59 questions : `hit@10` 76,3 % → **96,6 %**, 25 questions mieux classées,
+  3 moins bien, **latence inchangée**. Pourquoi : dans `تفسير ابن المنذر`, 85 % des
   chunks sont des chaînes de transmetteurs — le vecteur les confond, et quatre questions
   citant un verset mot pour mot n'étaient **jamais** retrouvées alors que l'index
   contenait ce verset **à la page attendue** (BM25 le trouve au rang 1).
@@ -175,6 +175,12 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   ChromaDB, jamais une seconde source de vérité ; il se reconstruit quand le **nombre**
   de chunks change, donc **redémarrer l'API après une ré-ingestion** (modifier le contenu
   sans changer le nombre ne le déclenche pas).
+- **La constante et le nombre de candidats de la fusion ne sont PAS indépendants.**
+  Avec `HYBRID_RRF_K=60` et un poids de 3 pour le vecteur, le rang 1 lexical
+  (1/61 = 0,0164) était battu par le 50e candidat vectoriel (3/110 = 0,0273) : le
+  lexical ne pouvait que reclasser ce que le vecteur avait déjà vu, et quatre pages
+  classées 1res par BM25 restaient introuvables. Poids **égaux** (1:1) et constante
+  **10** : mesuré, et stable sur toute la troncature (50, 100, 200).
 - **Tokenisation arabe : ne jamais écrire la plage `\u0600-\u06FF` dans une expression
   régulière.** Elle contient la ponctuation arabe — le « ؟ » final de chaque question se
   collait au dernier mot, qui ne correspondait alors plus à rien, **sans aucun message**.

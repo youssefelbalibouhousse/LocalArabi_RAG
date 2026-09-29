@@ -335,9 +335,9 @@ faut les **fusionner** plutôt que d'en choisir une :
 | recherche | `hit@10` | `MRR@10` | introuvables | latence |
 |---|---|---|---|---|
 | vectorielle seule | 76,3 % | 0,52 | 14 | 340 ms |
-| **fusion (RRF)** | **89,8 %** | **0,61** | **6** | 333 ms |
+| **fusion (RRF)** | **96,6 %** | **0,67** | **2** | 321 ms |
 
-59 questions, 3 355 chunks, 3 ouvrages — **20 questions mieux classées, 1 moins
+59 questions, 3 355 chunks, 3 ouvrages — **25 questions mieux classées, 3 moins
 bien**. La latence ne bouge pas : l'index inversé ne note que les documents
 contenant les mots de la question, pas les 3 355.
 
@@ -355,6 +355,41 @@ chaque recherche avant fusion), `HYBRID_RRF_K` (constante d'aplatissement),
 > distance vectorielle n'ont aucune unité commune : les additionner serait une
 > faute de dimension. Le rang, lui, est toujours un entier de 1 à N.
 
+### Le réglage n'est pas un détail : une erreur de conception, trouvée et corrigée
+
+La première version fusionnait 50 candidats par recherche avec un poids de 3 pour
+le vecteur. Le rang 1 lexical ne valait alors que $1/(60+1) = 0{,}0164$, quand le
+**50e** candidat vectoriel valait déjà $3/(60+50) = 0{,}0273$ : la recherche
+lexicale **ne pouvait que reclasser ce que le vecteur avait déjà vu**, jamais
+introduire ce qu'il avait manqué. Quatre questions dont la page attendue était
+classée **1re sur 3 355** par BM25 restaient introuvables.
+
+Le symptôme était invisible dans le score global : la fusion gagnait bien
++13 points. C'est en cherchant *pourquoi* quatre questions précises échouaient
+qu'on a vu que l'explication annoncée était fausse.
+
+Grille mesurée ensuite, à poids égaux :
+
+| constante | `hit@5` | `hit@10` | MRR |
+|---|---|---|---|
+| 5 | 88,1 % | 94,9 % | 0,669 |
+| **10** | **88,1 %** | **96,6 %** | **0,670** |
+| 20 | 84,7 % | 96,6 % | 0,650 |
+| 60 | 83,1 % | 93,2 % | 0,631 |
+
+`hit@5` est ce que le **modèle** voit (`N_RESULTS=5`) ; `hit@10` ce que le harnais
+évalue. La constante 10 est le seul point qui satisfasse les deux — et le résultat
+ne dépend **pas** de la troncature (50, 100 et 200 candidats donnent la même
+chose), ce qui est la meilleure garantie contre un réglage qui ne vaudrait que
+pour ces 59 questions.
+
+> 💡 **Les poids sont égaux (1:1), et ce n'est pas un hasard.** Toutes les
+> configurations pondérées mesurées sont erratiques (76,3 % à 94,9 % selon la
+> constante, sans régularité), là où toutes les configurations à poids égaux se
+> tiennent entre 89,8 % et 96,6 %. La mise en forme standard de RRF est
+> symétrique : introduire un poids revient à décider à l'avance quelle recherche a
+> raison.
+
 ⚠️ **L'index lexical est un cache dérivé de ChromaDB**, pas une seconde source de
 vérité — il est donc impossible qu'il « mente » comme a pu le faire le registre.
 Il est reconstruit quand le **nombre** de chunks change. Deux conséquences :
@@ -371,12 +406,13 @@ Il est reconstruit quand le **nombre** de chunks change. Deux conséquences :
 | Sujet | Décision |
 |---|---|
 | Configuration | `app/config.py` est la **source unique de vérité**, surchargeable par variables d'environnement |
-| Recherche | **Hybride** : recherche vectorielle ET lexicale (BM25), fusionnées par rangs réciproques. Mesuré : `hit@10` 76,3 % → **89,8 %**, sans coût de latence. Voir « Recherche hybride » ci-dessus |
+| Recherche | **Hybride** : recherche vectorielle ET lexicale (BM25), fusionnées par rangs réciproques. Mesuré : `hit@10` 76,3 % → **96,6 %**, sans coût de latence. Voir « Recherche hybride » ci-dessus |
 | Ingestion | **Incrémentale et non destructive** : empreinte SHA-256 du contenu, remplacement par document, écriture par lots bornés. Registre dans `data/app.db`. Un index refuse de mélanger deux modèles d'embedding. |
 | Retrait | **Explicite** (`--forget`) et jamais automatique : un fichier disparu du disque n'est pas retiré pour autant. La purge efface le registre **avant** l'index, comme l'ingestion, pour qu'une panne laisse le document repris plutôt qu'inscrit à tort. |
 | Passages longs | `--continue-on-error` poursuit malgré les échecs et les récapitule ; `--retries` réessaie les pannes passagères (réseau, redémarrage), jamais les erreurs permanentes |
 | Formats | PDF (`pypdf`) et EPUB (`app/epub.py`), ramenés à la **même forme** en sortie : `chunk_pages` et toute la chaîne traitent les deux sans distinction |
 | Taille des lots | `INGEST_BATCH_SIZE` (32 par défaut) et `EMBEDDING_TIMEOUT` (120 s) se lisent **ensemble** : un lot est embarqué en une seule requête. Mesuré ici : ~0,55 s par chunk, donc 256 chunks dépassaient le délai de 60 s de la bibliothèque — l'écriture échouait en « timed out in add » |
+| Réglage de la fusion | `HYBRID_RRF_K` et les poids **ne sont pas indépendants** de `HYBRID_CANDIDATES` : une constante trop grande devant le bassin empêche la recherche lexicale d'introduire un extrait que le vecteur a manqué. Mesuré, et documenté dans `config.py` |
 | Fournisseur LLM | `LLM_PROVIDER=ollama` (auto-hébergé) ou `openai` (Groq, Together, vLLM…) |
 | Inscription | Ouverte en développement, **fermée par défaut en production** |
 | Clé JWT | Minimum 32 octets (RFC 7518) ; l'application refuse de démarrer en production avec la clé de développement |
