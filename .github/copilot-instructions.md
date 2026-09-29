@@ -190,3 +190,20 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   La liste de mots vides et la longueur minimale font partie de la configuration
   **mesurée** : les modifier invalide le tableau du README, et la mesure doit être refaite
   avant de croire à un gain.
+- **Le jeu d'or a DEUX populations, et elles ne se notent pas pareil.** `expected: []`
+  déclare une question **hors corpus** (la bonne réponse est « il n'y a rien ») ;
+  une clé `expected` **absente** reste une erreur. Une question hors corpus n'a pas de
+  rang — la récupération rend toujours *k* chunks : ce qui se mesure est la **distance du
+  chunk le plus proche**. Mesuré : répondables min 0,26 / max **0,52** ; hors corpus min
+  **0,54** / max 0,67 — populations séparées, mais avec 0,02 de marge seulement.
+  `est_orpheline` doit renvoyer **False** pour une question hors corpus : sans ce cas
+  particulier, `all([])` vaut `True` et **toutes** les questions de refus seraient
+  écartées de la mesure.
+- **Un taux de refus ne se mesure PAS par correspondance de phrase.** Un détecteur
+  cherchant la formule du prompt a compté 5 refus sur 15 là où une lecture en trouve 12 :
+  il manquait les reformulations arabes et butait sur une apostrophe. L'erreur va dans le
+  sens rassurant, donc elle ne se voit pas. Cette mesure demande un juge, ou une lecture.
+- **Les sources sont citées dès que la récupération rend quelque chose** — et avec
+  `DISTANCE_THRESHOLD=-1` elle rend toujours quelque chose. Mesuré : **15 réponses sur 15**
+  portaient une citation, **refus compris**. Ne jamais présenter une réponse citant une
+  source comme si la source l'appuyait : le système ne le garantit pas encore.

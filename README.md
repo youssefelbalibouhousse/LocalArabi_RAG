@@ -319,6 +319,72 @@ non de la qualité de la récupération.
 > si le bon passage est absent du top-*k* (problème de découpage ou de modèle)
 > ou seulement mal classé (problème que le reranker résout).
 
+### Questions hors corpus : la bonne réponse est « il n'y a rien »
+
+Un jeu d'or ne contient pas que des questions auxquelles le corpus répond. Les
+plus révélatrices sont celles auxquelles il **ne peut pas** répondre — c'est
+exactement ce qu'un testeur essaie en premier. Elles s'écrivent avec une liste
+`expected` **vide** :
+
+```json
+{"id": "q073", "question": "Quelle est la recette de la tarte tatin ?",
+ "lang": "fr", "status": "validated", "expected": [], "notes": "Hors corpus : cuisine."}
+```
+
+`expected: []` est un **choix** ; une clé `expected` **absente** reste une erreur.
+Les confondre ferait passer une question mal saisie pour un exercice de refus, et
+elle serait comptée réussie quel que soit son résultat.
+
+Les deux populations ne se mesurent pas de la même façon, et le rapport les
+sépare. Une question hors corpus **n'a pas de rang** : la récupération rend
+toujours *k* chunks, même hors sujet. Ce qui se mesure, c'est la **distance du
+chunk le plus proche** — et c'est elle qui dit si le seuil de distance de
+l'application est réglable :
+
+| | min | médiane | max |
+|---|---|---|---|
+| 59 questions répondables | 0,26 | 0,38 | **0,52** |
+| 15 questions hors corpus | **0,54** | 0,61 | 0,67 |
+
+**Les deux populations ne se recouvrent pas** sur cette mesure — le seuil
+(`DISTANCE_THRESHOLD`, aujourd'hui désactivé) serait donc calibrable autour de
+0,53. ⚠️ Mais la marge est de **0,02**, et elle repose sur deux extrêmes, les
+statistiques les moins stables qui soient : 74 questions ne suffisent pas à
+adopter ce seuil. À vérifier sur un jeu hors corpus plus large avant d'y toucher.
+
+### Le refus ne se mesure pas par une phrase
+
+Les 15 questions hors corpus ont été passées dans le chemin de production réel
+(récupération → génération → assemblage). Résultat lu et classé à la main :
+
+| | nombre |
+|---|---|
+| refus corrects | **12 / 15** |
+| **fabrications** | **3 / 15** |
+
+Les trois fabrications sont du pire type : à « en quelle année est tombé le mur
+de Berlin ? » le système répond « **1989** », et à « qui a gagné la Coupe du monde
+1998 ? » il répond « **la France** » — deux faits exacts, tirés de la mémoire du
+modèle et non du corpus, puis décorés d'une citation vers une page qui parle d'un
+sultan ottoman.
+
+> ⚠️ **Un détecteur automatique de refus s'est trompé, et c'est le résultat le
+> plus utile de cette mesure.** En cherchant la phrase exacte du prompt, il
+> comptait **5 refus sur 15** là où il y en a 12 : il manquait les reformulations
+> arabes (« لا توجد الإجابة في السياق المستخرج ») et butait sur une apostrophe
+> en français. **Un taux de refus mesuré par correspondance de phrase est faux**,
+> et il l'est dans le sens rassurant — il fait croire au pire. Cette mesure
+> demande un juge, ou une lecture.
+
+⚠️ **Structurel, et indépendant du modèle** : les sources sont ajoutées à la
+réponse **dès que la récupération a rendu quelque chose** (`app/main.py`). Comme
+`DISTANCE_THRESHOLD` est désactivé, elle rend toujours quelque chose : **15
+réponses sur 15 portaient une citation**, refus compris. L'utilisateur ne peut
+donc pas distinguer « ceci vient de la page citée » de « le système a refusé et on
+a collé des sources sans rapport dessous ». C'est le point à corriger en priorité
+pour un pilote — et la séparation des distances ci-dessus montre qu'on a de quoi
+le faire.
+
 ## Recherche hybride (lexicale + vectorielle)
 
 Chercher par le **sens** ne suffit pas sur ce corpus. Dans `تفسير ابن المنذر`,
