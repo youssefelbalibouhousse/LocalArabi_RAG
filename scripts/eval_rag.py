@@ -206,6 +206,7 @@ def mise_en_contexte(collection, k: int, questions: list, empreinte, sources: se
         "questions_draft": sum(
             1 for question in questions if question.status == evaluation.STATUS_DRAFT
         ),
+        "questions_hors_corpus": sum(1 for q in questions if q.est_hors_corpus),
         **hybride,
     }
 
@@ -252,6 +253,24 @@ def mode_sample(args: argparse.Namespace) -> int:
         afficher(texte)
 
     return 0
+
+
+def distance_minimale(collection, question: str, k: int) -> float | None:
+    """Distance L2 du chunk le plus proche de la question, ou ``None``.
+
+    Mesure SÉPARÉE de `rag.retrieve`, et volontairement : une requête brute,
+    sans fusion ni seuil. C'est la seule grandeur qui puisse trancher la question
+    du seuil de distance — la plus petite distance sépare-t-elle une question
+    à laquelle le corpus répond d'une question à laquelle il ne répond pas ?
+
+    Si l'on relevait cette distance sur le résultat déjà filtré, on ne pourrait
+    plus voir ce que le filtre a écarté.
+    """
+    resultat = collection.query(
+        query_texts=[question], n_results=k, include=["distances"]
+    )
+    distances = resultat["distances"][0]
+    return min(distances) if distances else None
 
 
 def mode_run(args: argparse.Namespace) -> int:
@@ -312,9 +331,15 @@ def mode_run(args: argparse.Namespace) -> int:
         )
         return 1
 
+    hors_corpus_prevues = [q for q in a_mesurer if q.est_hors_corpus]
     afficher(
-        f"Mesure de {evaluation.accorder(len(a_mesurer), 'question')} "
-        f"(top-{args.k}) sur {evaluation.accorder(total, 'chunk')}…"
+        f"Mesure de {evaluation.accorder(len(a_mesurer), 'question')}"
+        + (
+            f" dont {len(hors_corpus_prevues)} hors corpus"
+            if hors_corpus_prevues
+            else ""
+        )
+        + f" (top-{args.k}) sur {evaluation.accorder(total, 'chunk')}…"
     )
 
     if orphelines:
@@ -354,6 +379,8 @@ def mode_run(args: argparse.Namespace) -> int:
             rank=evaluation.first_match_rank(sources, question.expected),
             latency_ms=latence_ms,
             retrieved=tuple(sources),
+            min_distance=distance_minimale(collection, question.question, args.k),
+            hors_corpus=question.est_hors_corpus,
         ))
 
     rapport = evaluation.build_report(

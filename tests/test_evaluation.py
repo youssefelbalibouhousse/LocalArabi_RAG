@@ -126,10 +126,30 @@ def test_une_question_vide_echoue():
         evaluation.parse_golden_line(ligne(question="   "), 1)
 
 
-def test_une_liste_attendue_vide_echoue():
-    """Sans source attendue, la question serait comptée introuvable à jamais."""
+def test_une_liste_attendue_VIDE_est_acceptee():
+    """`expected: []` est un CHOIX, pas une erreur : « le corpus ne doit pas répondre ».
+
+    C'est la question qu'un utilisateur pose le plus souvent sans le savoir, et
+    la seule qui vérifie que le système refuse au lieu d'inventer.
+    """
+    question = evaluation.parse_golden_line(ligne(expected=[]), 1)
+
+    assert question.est_hors_corpus
+    assert question.expected == ()
+
+
+def test_un_champ_attendu_ABSENT_echoue():
+    """Une clé absente reste une erreur : ne pas la confondre avec `[]`.
+
+    Sinon une question mal saisie passerait pour un exercice de refus, et
+    serait comptée comme une réussite quel que soit son résultat.
+    """
     with pytest.raises(GoldenError, match="« expected »"):
-        evaluation.parse_golden_line(ligne(expected=[]), 1)
+        evaluation.parse_golden_line(json.dumps({"question": "سؤال"}), 1)
+
+
+def test_une_question_avec_source_attendue_n_est_pas_hors_corpus():
+    assert not evaluation.parse_golden_line(ligne(), 1).est_hors_corpus
 
 
 def test_une_source_attendue_sans_nom_de_fichier_echoue():
@@ -567,3 +587,161 @@ def test_une_comparaison_sans_avertissement_quand_tout_concorde():
     texte = evaluation.format_comparison(avant, apres)
 
     assert "⚠️" not in texte
+
+# --- Les questions hors corpus -------------------------------------------
+#
+# Une question dont la réponse n'est PAS dans le corpus ne se mesure pas par un
+# rang : il n'y a rien à retrouver, et la récupération rend toujours k chunks.
+# Ce qui se mesure est la distance du chunk le plus proche — et c'est ce qui
+# décide si le seuil de distance de l'application est réglable ou non.
+
+
+def question_hors_corpus(identifiant: str, distance: float | None = None) -> QuestionResult:
+    """Un résultat de question à laquelle le corpus ne peut pas répondre."""
+    return QuestionResult(
+        question_id=identifiant,
+        question=f"question {identifiant}",
+        rank=None,
+        latency_ms=10.0,
+        min_distance=distance,
+        hors_corpus=True,
+    )
+
+
+def test_une_question_hors_corpus_n_est_jamais_orpheline():
+    """Le piège que ce cas particulier évite.
+
+    `est_orpheline` teste « aucune de mes sources n'est indexée ». Sur une liste
+    vide, `all([])` vaut True : sans le cas particulier, TOUTES les questions de
+    refus auraient été silencieusement écartées de la mesure — c'est-à-dire
+    exactement celles qu'on venait mesurer.
+    """
+    question = evaluation.parse_golden_line(ligne(expected=[]), 1)
+
+    assert not evaluation.est_orpheline(question, sources_indexees=set())
+
+
+def test_une_question_hors_corpus_est_ecartee_des_metriques_de_rang():
+    """Elle ne doit ni gonfler ni couler le score : elle n'y participe pas."""
+    rapport_mixte = evaluation.build_report(
+        label="mixte",
+        k=5,
+        results=[
+            resultat("q1", 1),
+            resultat("q2", None),
+            question_hors_corpus("h1"),
+            question_hors_corpus("h2"),
+        ],
+    )
+
+    assert len(rapport_mixte.answerable) == 2
+    assert len(rapport_mixte.hors_corpus) == 2
+    assert rapport_mixte.hit_at_k == 0.5
+    assert [result.question_id for result in rapport_mixte.misses] == ["q2"]
+
+
+def test_les_compteurs_de_rang_ignorent_les_questions_hors_corpus():
+    """« Introuvable » ne veut pas dire la même chose dans les deux populations."""
+    rapport_mixte = evaluation.build_report(
+        label="mixte",
+        k=5,
+        results=[resultat("q1", 1), question_hors_corpus("h1")],
+    )
+
+    texte = evaluation.format_report(rapport_mixte)
+
+    assert "1 répondable(s), 1 hors corpus" in texte
+    assert "(1/1)" in texte  # le dénominateur du hit@k
+    assert "Introuvable" in texte
+    assert "h1" not in texte.split("Introuvable")[1]  # h1 n'est pas listée manquée
+
+
+def test_les_distances_des_deux_populations_sont_affichees_et_comparees():
+    """Le verdict qui décide si un seuil de distance est réglable."""
+    rapport_mixte = evaluation.build_report(
+        label="mixte",
+        k=5,
+        results=[
+            QuestionResult("q1", "q1", 1, 1.0, min_distance=0.20),
+            QuestionResult("q2", "q2", 1, 1.0, min_distance=0.40),
+            question_hors_corpus("h1", distance=0.35),
+            question_hors_corpus("h2", distance=0.60),
+        ],
+    )
+
+    texte = evaluation.format_report(rapport_mixte)
+
+    assert "répondables" in texte
+    assert "hors corpus" in texte
+    # 0,35 (hors corpus) est plus proche que 0,40 (répondable) : les deux
+    # populations se recouvrent, donc aucun seuil ne peut les séparer.
+    assert "SE RECOUVRENT" in texte
+
+
+def test_des_populations_separees_annoncent_un_seuil_utilisable():
+    rapport_mixte = evaluation.build_report(
+        label="mixte",
+        k=5,
+        results=[
+            QuestionResult("q1", "q1", 1, 1.0, min_distance=0.20),
+            question_hors_corpus("h1", distance=0.80),
+        ],
+    )
+
+    texte = evaluation.format_report(rapport_mixte)
+
+    assert "Populations séparées" in texte
+    assert "SE RECOUVRENT" not in texte
+
+
+def test_les_statistiques_de_distance_sont_correctes():
+    stats = evaluation.distances_plus_proches([
+        QuestionResult("a", "a", None, 1.0, min_distance=0.30),
+        QuestionResult("b", "b", None, 1.0, min_distance=0.10),
+        QuestionResult("c", "c", None, 1.0, min_distance=0.20),
+    ])
+
+    assert stats is not None
+    assert (stats.nombre, stats.minimum, stats.mediane, stats.maximum) == (3, 0.10, 0.20, 0.30)
+
+
+def test_des_statistiques_de_distance_sont_none_sans_distance_relevee():
+    """Un rapport écrit avant l'existence de cette mesure reste relisible."""
+    assert evaluation.distances_plus_proches([resultat("q1", 1)]) is None
+
+
+def test_une_question_hors_corpus_survit_a_un_aller_retour_json():
+    """Sans ce champ, un rapport relu serait impossible à interpréter : un rang
+    à None signifierait tour à tour « échec » et « réussite »."""
+    original = evaluation.build_report(
+        label="mixte",
+        k=5,
+        results=[question_hors_corpus("h1", distance=0.42)],
+    )
+
+    relu = EvaluationReport.from_dict(json.loads(json.dumps(original.to_dict())))
+
+    assert relu.hors_corpus[0].question_id == "h1"
+    assert relu.hors_corpus[0].min_distance == 0.42
+    assert relu.answerable == ()
+
+
+def test_la_comparaison_ignore_les_questions_hors_corpus():
+    """Comparer un rang à un autre n'a de sens que pour les questions répondables.
+
+    Sans ce filtre, une question de refus — dont le rang est None avant comme
+    après — serait comptée « inchangée », gonflant le nombre de questions
+    stables avec des questions qui ne mesurent aucun rang.
+    """
+    avant = evaluation.build_report(
+        label="avant", k=5, results=[resultat("q1", 2), question_hors_corpus("h1")]
+    )
+    apres = evaluation.build_report(
+        label="apres", k=5, results=[resultat("q1", 1), question_hors_corpus("h1")]
+    )
+
+    texte = evaluation.format_comparison(avant, apres)
+
+    assert "Questions communes : 1" in texte
+    assert "Questions mieux classées : 1" in texte
+    assert "Inchangées : 0" in texte

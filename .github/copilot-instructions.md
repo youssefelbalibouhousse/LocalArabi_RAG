@@ -165,11 +165,14 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   et le choix de police, jamais par l'espacement des lettres.
 - **Recherche hybride** : `rag.retrieve()` mène une recherche vectorielle **et** une
   recherche lexicale (BM25), puis les **fusionne par rangs réciproques** (`app/lexical.py`).
-  Mesuré sur 59 questions : `hit@10` 76,3 % → **96,6 %**, 25 questions mieux classées,
-  3 moins bien, **latence inchangée**. Pourquoi : dans `تفسير ابن المنذر`, 85 % des
-  chunks sont des chaînes de transmetteurs — le vecteur les confond, et quatre questions
-  citant un verset mot pour mot n'étaient **jamais** retrouvées alors que l'index
-  contenait ce verset **à la page attendue** (BM25 le trouve au rang 1).
+  Mesuré sur 59 questions validées : `hit@10` 78,0 % → **98,3 %**, 26 questions mieux
+  classées, 3 moins bien. Pourquoi : dans `تفسير ابن المنذر`, 85 % des chunks sont des
+  chaînes de transmetteurs — le vecteur les confond, et quatre questions citant un verset
+  mot pour mot n'étaient **jamais** retrouvées alors que l'index contenait ce verset
+  **à la page attendue** (BM25 le trouve au rang 1).
+  **La latence n'est PAS comparable** entre deux exécutions sur cette machine : la même
+  configuration mesurée deux fois a varié de 60 ms (score identique). Ne jamais conclure
+  d'un écart de latence sans avoir mesuré le bruit.
   Ne **jamais** fusionner des scores — un score BM25 et une distance L2 n'ont aucune
   unité commune : uniquement des **rangs**. L'index lexical est un **cache dérivé** de
   ChromaDB, jamais une seconde source de vérité ; il se reconstruit quand le **nombre**
@@ -187,3 +190,20 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   La liste de mots vides et la longueur minimale font partie de la configuration
   **mesurée** : les modifier invalide le tableau du README, et la mesure doit être refaite
   avant de croire à un gain.
+- **Le jeu d'or a DEUX populations, et elles ne se notent pas pareil.** `expected: []`
+  déclare une question **hors corpus** (la bonne réponse est « il n'y a rien ») ;
+  une clé `expected` **absente** reste une erreur. Une question hors corpus n'a pas de
+  rang — la récupération rend toujours *k* chunks : ce qui se mesure est la **distance du
+  chunk le plus proche**. Mesuré : répondables min 0,26 / max **0,52** ; hors corpus min
+  **0,54** / max 0,67 — populations séparées, mais avec 0,02 de marge seulement.
+  `est_orpheline` doit renvoyer **False** pour une question hors corpus : sans ce cas
+  particulier, `all([])` vaut `True` et **toutes** les questions de refus seraient
+  écartées de la mesure.
+- **Un taux de refus ne se mesure PAS par correspondance de phrase.** Un détecteur
+  cherchant la formule du prompt a compté 5 refus sur 15 là où une lecture en trouve 12 :
+  il manquait les reformulations arabes et butait sur une apostrophe. L'erreur va dans le
+  sens rassurant, donc elle ne se voit pas. Cette mesure demande un juge, ou une lecture.
+- **Les sources sont citées dès que la récupération rend quelque chose** — et avec
+  `DISTANCE_THRESHOLD=-1` elle rend toujours quelque chose. Mesuré : **15 réponses sur 15**
+  portaient une citation, **refus compris**. Ne jamais présenter une réponse citant une
+  source comme si la source l'appuyait : le système ne le garantit pas encore.
