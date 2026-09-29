@@ -106,3 +106,25 @@
 {"id": "q035", "question": "ماذا يحدث إذا ملك الرجل أبويه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 129}], "notes": "727 - وأجمعوا أن الرجل إذا ملك أبويه... أنهم يعتقون عليه ساعة تملكهم."}
 {"id": "q036", "question": "متى تجب قسمة الأرض بين الشركاء؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 132}], "notes": "750 - الأرض إذا كانت بين شركاء، واحتملت القسمة عن غير ضرر يلحق أحدا منهم: قسمت."}
 {"id": "q037", "question": "Peut-on épouser la tante de son épouse ?", "lang": "fr", "status": "draft", "expected": [{"source": "12445.epub", "page": 81}], "notes": "Issue 370 (ص 81) : « وأجمعوا على أن لا تنكح المرأة على عمتها. ولا على خالتها ». Choix mesuré : parmi 8 questions françaises testées, c'est la seule classée rang 1 (les 7 autres : rangs 2 à 6, toutes dans le top-10)."}
+{"id": "q038", "question": "هل يجوز للمحرم لبس السراويل إذا لم يجد الإزار؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 214}], "notes": ""}
+{"id": "q039", "question": "ما ثواب العمرة في شهر رمضان؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 233}], "notes": ""}
+{"id": "q040", "question": "Les frères et sœurs héritent-ils lorsque le père est encore en vie ?", "lang": "fr", "status": "draft", "expected": [{"source": "12843.epub", "page": 282}], "notes": ""}
+{"id": "q041", "question": "ما حكم زواج المرأة من عبدها؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 310}], "notes": ""}
+{"id": "q042", "question": "إذا أسلمت الزوجة قبل زوجها فما حكم النكاح؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 316}], "notes": ""}
+{"id": "q043", "question": "هل يُقتل المسلم بالكافر؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 350}], "notes": ""}
+{"id": "q044", "question": "تحت أي شجرة بايع الصحابة رسول الله صلى الله عليه وسلم؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 457}], "notes": ""}
+{"id": "q045", "question": "كيف قضى رسول الله صلى الله عليه وسلم في بعير اختصم فيه رجلان؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 523}], "notes": ""}
+{"id": "q046", "question": "ما الثلاث التي كرهها الله لعباده؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 561}], "notes": ""}
+{"id": "q047", "question": "هل يصح بيع المفلس بعد الحجر عليه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 563}], "notes": ""}
+{"id": "q048", "question": "ما حكم استقراض الحنطة والشعير والتمر؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 578}], "notes": ""}
+{"id": "q049", "question": "ما حكم حلب ماشية الغير بغير إذنه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 632}], "notes": ""}
+{"id": "q050", "question": "ما الدليل الذي استشهد به ابن عباس على جواز السلم؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 66}], "notes": ""}
+{"id": "q051", "question": "كيف فسّر قتادة قوله تعالى: {يوم تجد كل نفس ما عملت من خير محضرا}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 168}], "notes": ""}
+{"id": "q052", "question": "فيمن نزلت آية: {كيف يهدي الله قوما كفروا بعد إيمانهم}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 278}], "notes": ""}
+{"id": "q053", "question": "كم كانت الكعبة مخلوقة قبل الأرض؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 294}], "notes": ""}
+{"id": "q054", "question": "ما معنى {مسوّمين} في قوله تعالى: {بخمسة آلاف من الملائكة مسوّمين}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 369}], "notes": ""}
+{"id": "q055", "question": "ما معنى {ثم صرفكم عنهم ليبتليكم}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 446}], "notes": ""}
+{"id": "q056", "question": "ما معنى {لأكفرن عنهم سيئاتهم}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 539}], "notes": ""}
+{"id": "q057", "question": "ما حد الزانية الثيب إذا فجرت؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 601}], "notes": ""}
+{"id": "q058", "question": "كم حد الأمة إذا أتت بفاحشة؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 654}], "notes": ""}
+{"id": "q059", "question": "ما معنى {ولا تقتلوا أنفسكم} عند مجاهد؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 662}], "notes": ""}
