@@ -165,11 +165,14 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   et le choix de police, jamais par l'espacement des lettres.
 - **Recherche hybride** : `rag.retrieve()` mène une recherche vectorielle **et** une
   recherche lexicale (BM25), puis les **fusionne par rangs réciproques** (`app/lexical.py`).
-  Mesuré sur 59 questions : `hit@10` 76,3 % → **96,6 %**, 25 questions mieux classées,
-  3 moins bien, **latence inchangée**. Pourquoi : dans `تفسير ابن المنذر`, 85 % des
-  chunks sont des chaînes de transmetteurs — le vecteur les confond, et quatre questions
-  citant un verset mot pour mot n'étaient **jamais** retrouvées alors que l'index
-  contenait ce verset **à la page attendue** (BM25 le trouve au rang 1).
+  Mesuré sur 59 questions validées : `hit@10` 78,0 % → **98,3 %**, 26 questions mieux
+  classées, 3 moins bien. Pourquoi : dans `تفسير ابن المنذر`, 85 % des chunks sont des
+  chaînes de transmetteurs — le vecteur les confond, et quatre questions citant un verset
+  mot pour mot n'étaient **jamais** retrouvées alors que l'index contenait ce verset
+  **à la page attendue** (BM25 le trouve au rang 1).
+  **La latence n'est PAS comparable** entre deux exécutions sur cette machine : la même
+  configuration mesurée deux fois a varié de 60 ms (score identique). Ne jamais conclure
+  d'un écart de latence sans avoir mesuré le bruit.
   Ne **jamais** fusionner des scores — un score BM25 et une distance L2 n'ont aucune
   unité commune : uniquement des **rangs**. L'index lexical est un **cache dérivé** de
   ChromaDB, jamais une seconde source de vérité ; il se reconstruit quand le **nombre**

@@ -332,14 +332,21 @@ Les deux recherches échouent différemment — BM25 ne comprend pas les
 paraphrases, le vecteur noie les termes rares — et c'est exactement pourquoi il
 faut les **fusionner** plutôt que d'en choisir une :
 
-| recherche | `hit@10` | `MRR@10` | introuvables | latence |
-|---|---|---|---|---|
-| vectorielle seule | 76,3 % | 0,52 | 14 | 340 ms |
-| **fusion (RRF)** | **96,6 %** | **0,67** | **2** | 321 ms |
+| recherche | `hit@10` | `MRR@10` | introuvables |
+|---|---|---|---|
+| vectorielle seule | 78,0 % | 0,52 | 13 |
+| **fusion (RRF)** | **98,3 %** | **0,69** | **1** |
 
-59 questions, 3 355 chunks, 3 ouvrages — **25 questions mieux classées, 3 moins
-bien**. La latence ne bouge pas : l'index inversé ne note que les documents
-contenant les mots de la question, pas les 3 355.
+59 questions, 3 355 chunks, 3 ouvrages, jeu d'or **relu et validé** — **26
+questions mieux classées, 3 moins bien, 30 inchangées**.
+
+> ⏱️ **La latence n'est pas un critère ici, et mieux vaut le dire.** Les deux
+> configurations mesurent entre 314 et 384 ms selon l'exécution. La MÊME
+> configuration mesurée deux fois de suite a varié de **60 ms** (384 → 324 ms)
+> alors que ses scores étaient identiques au point près. À cette échelle, comparer
+> la latence de deux réglages, c'est mesurer du bruit. Ce qui est solide : la
+> moitié lexicale ne parcourt pas le corpus — l'index inversé ne note que les
+> documents contenant les mots de la question.
 
 ```bash
 python scripts/eval_rag.py --run --label hybride      # fusion (défaut)
@@ -372,10 +379,10 @@ Grille mesurée ensuite, à poids égaux :
 
 | constante | `hit@5` | `hit@10` | MRR |
 |---|---|---|---|
-| 5 | 88,1 % | 94,9 % | 0,669 |
-| **10** | **88,1 %** | **96,6 %** | **0,670** |
-| 20 | 84,7 % | 96,6 % | 0,650 |
-| 60 | 83,1 % | 93,2 % | 0,631 |
+| 5 | 89,8 % | 96,6 % | 0,686 |
+| **10** | **89,8 %** | **98,3 %** | **0,687** |
+| 20 | 86,4 % | 98,3 % | 0,667 |
+| 60 | 84,7 % | 94,9 % | 0,648 |
 
 `hit@5` est ce que le **modèle** voit (`N_RESULTS=5`) ; `hit@10` ce que le harnais
 évalue. La constante 10 est le seul point qui satisfasse les deux — et le résultat
@@ -384,11 +391,29 @@ chose), ce qui est la meilleure garantie contre un réglage qui ne vaudrait que
 pour ces 59 questions.
 
 > 💡 **Les poids sont égaux (1:1), et ce n'est pas un hasard.** Toutes les
-> configurations pondérées mesurées sont erratiques (76,3 % à 94,9 % selon la
-> constante, sans régularité), là où toutes les configurations à poids égaux se
-> tiennent entre 89,8 % et 96,6 %. La mise en forme standard de RRF est
-> symétrique : introduire un poids revient à décider à l'avance quelle recherche a
-> raison.
+> configurations pondérées mesurées sont erratiques, là où toutes les
+> configurations à poids égaux se tiennent entre 94,9 % et 98,3 %. La mise en
+> forme standard de RRF est symétrique : introduire un poids revient à décider à
+> l'avance quelle recherche a raison.
+
+Et il y avait une raison cachée à cette erreur de poids. Le premier calibrage
+concluait « 3 pour le vecteur » sur un lexical **handicapé par le bug de
+ponctuation** : mesuré sur le même jeu d'or, le lexical seul donne **74,6 %** de
+`hit@10` avec la plage `\u0600-\u06FF`, et **88,1 %** avec `\w`. Le bug coûtait
+13,5 points à la recherche lexicale — et c'est une recherche amoindrie que les
+poids arbitraient. **Un défaut de mesure dans un composant fausse le réglage d'un
+autre**, sans que rien ne le signale.
+
+Deux enseignements, tous deux mesurés :
+
+| tokenisation | lexical seul `hit@10` | MRR |
+|---|---|---|
+| plage `\u0600-\u06FF` (le `؟` collé au mot) | 74,6 % | 0,562 |
+| `\w` | **88,1 %** | **0,686** |
+
+Sur ce corpus, la recherche **lexicale seule bat la recherche vectorielle seule**
+(88,1 % contre 78,0 %) — ce qui ne se voyait pas tant que la tokenisation était
+fausse.
 
 ⚠️ **L'index lexical est un cache dérivé de ChromaDB**, pas une seconde source de
 vérité — il est donc impossible qu'il « mente » comme a pu le faire le registre.
@@ -406,7 +431,7 @@ Il est reconstruit quand le **nombre** de chunks change. Deux conséquences :
 | Sujet | Décision |
 |---|---|
 | Configuration | `app/config.py` est la **source unique de vérité**, surchargeable par variables d'environnement |
-| Recherche | **Hybride** : recherche vectorielle ET lexicale (BM25), fusionnées par rangs réciproques. Mesuré : `hit@10` 76,3 % → **96,6 %**, sans coût de latence. Voir « Recherche hybride » ci-dessus |
+| Recherche | **Hybride** : recherche vectorielle ET lexicale (BM25), fusionnées par rangs réciproques. Mesuré sur un jeu d'or validé : `hit@10` 78,0 % → **98,3 %**. Voir « Recherche hybride » ci-dessus |
 | Ingestion | **Incrémentale et non destructive** : empreinte SHA-256 du contenu, remplacement par document, écriture par lots bornés. Registre dans `data/app.db`. Un index refuse de mélanger deux modèles d'embedding. |
 | Retrait | **Explicite** (`--forget`) et jamais automatique : un fichier disparu du disque n'est pas retiré pour autant. La purge efface le registre **avant** l'index, comme l'ingestion, pour qu'une panne laisse le document repris plutôt qu'inscrit à tort. |
 | Passages longs | `--continue-on-error` poursuit malgré les échecs et les récapitule ; `--retries` réessaie les pannes passagères (réseau, redémarrage), jamais les erreurs permanentes |

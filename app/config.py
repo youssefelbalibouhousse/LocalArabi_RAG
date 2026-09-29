@@ -147,9 +147,9 @@ DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "-1"))
 #
 #   | recherche            | hit@10 | MRR@10 |
 #   |----------------------|--------|--------|
-#   | vectorielle seule    | 76,3 % | 0,52   |
-#   | lexicale seule       | 72,9 % | 0,55   |
-#   | fusion (les deux)    | 96,6 % | 0,67   |
+#   | vectorielle seule    | 78,0 % | 0,52   |
+#   | lexicale seule       | 88,1 % | 0,69   |
+#   | fusion (les deux)    | 98,3 % | 0,69   |
 #
 # La cause est identifiable question par question. Dans `تفسير ابن المنذر`,
 # 85 % des chunks sont des chaînes de transmetteurs (« حدّثنا… عن… ») : un chunk
@@ -184,10 +184,10 @@ HYBRID_CANDIDATES = int(os.getenv("HYBRID_CANDIDATES", "50"))
 # Grille mesurée à poids égaux (59 questions, 3 355 chunks) :
 #
 #   constante   hit@5   hit@10   MRR
-#        5      88,1 %   94,9 %  0,669
-#       10      88,1 %   96,6 %  0,670   <- retenu (10 à 20 donnent le même hit@10)
-#       20      84,7 %   96,6 %  0,650
-#       60      83,1 %   93,2 %  0,631
+#        5      89,8 %   96,6 %  0,686
+#       10      89,8 %   98,3 %  0,687   <- retenu (10 à 20 donnent le même hit@10)
+#       20      86,4 %   98,3 %  0,667
+#       60      84,7 %   94,9 %  0,648
 #
 # `hit@5` est ce que le MODÈLE voit (N_RESULTS=5) ; il plafonne tant que la
 # constante reste <= 10. La constante 10 est le seul point qui satisfasse les
