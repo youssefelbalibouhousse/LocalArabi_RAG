@@ -7,6 +7,7 @@ from itertools import pairwise
 from types import SimpleNamespace
 
 import build_kb
+import pytest
 
 from app import config, rag
 
@@ -709,3 +710,57 @@ def test_answer_question_sans_verification_si_desactivee(monkeypatch):
 
     assert rag.answer_question("Question ?", "contexte", "fr") == REPONSE_AR
     assert len(appels) == 1
+
+
+# --- Reconnaissance du refus ---------------------------------------------
+#
+# Ce test sert à NE PAS citer de source sous un refus — jamais à mesurer un taux
+# de refus. Il s'est déjà trompé dans ce rôle-là : 5 refus comptés sur 15 là où
+# une lecture en trouve 12. Les formules sont donc larges, et l'erreur restante
+# est assumée : manquer un refus formulé autrement laisse une citation de trop,
+# ce qui est moins grave que l'inverse.
+
+
+@pytest.mark.parametrize(
+    "reponse",
+    [
+        # Les formules que l'invite impose
+        "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة.",
+        "Désolé, il n'y a pas assez d'informations dans les documents fournis.",
+        # Les reformulations RÉELLEMENT observées, qui avaient échappé au premier détecteur
+        "لا توجد الإجابة في السياق المستخرج.",
+        "لا أوجد معلومات كافية في الوثائق المرفقة.",
+        "لا يوجد سياق يتعلق بمحرك الاحتراق الداخلي.",
+        "لا توجد في الوثائق المرفقة المعلومات الكافية حول حكم الصلاة في الطائرة.",
+        "حسب الوثائق المرفقة لا يوجد جواب مناسب للاستفسار.",
+        "لا توجد معلومات واضحة في السياق المرفق حول حكم العمل في البنوك.",
+        "Les extraits ne mentionnent pas du tout la cuisine.",
+    ],
+)
+def test_les_refus_reellement_observes_sont_reconnus(reponse):
+    langue = "fr" if any(c.isascii() and c.isalpha() for c in reponse) else "ar"
+
+    assert rag.est_un_refus(reponse, langue)
+
+
+@pytest.mark.parametrize(
+    "reponse",
+    [
+        "وأجمعوا على أن في المأمومة ثلث الدية.",
+        "La réponse se trouve à la page 81 de l'ouvrage.",
+        "",
+    ],
+)
+def test_une_reponse_normale_n_est_pas_prise_pour_un_refus(reponse):
+    """Un faux positif supprimerait les citations d'une vraie réponse."""
+    langue = "fr" if any(c.isascii() and c.isalpha() for c in reponse) else "ar"
+
+    assert not rag.est_un_refus(reponse, langue)
+
+
+def test_l_apostrophe_francaise_ne_fait_pas_echouer_la_reconnaissance():
+    """Elle a déjà fait échouer un détecteur : « d'informations » ne contient
+    pas la sous-chaîne « d informations »."""
+    assert rag.est_un_refus(
+        "Désolé, il n'y a pas assez d'informations dans les documents fournis.", "fr"
+    )

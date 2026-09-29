@@ -233,8 +233,22 @@ def ask(
     # sinon. Voir la défense en profondeur décrite dans app/rag.py.
     answer = rag.answer_question(question, context, language)
 
-    # 3. Ajoute la mention des sources à la réponse
-    if sources:
+    # 3. Ajoute la mention des sources — SAUF si la réponse est un refus.
+    #
+    # Sans cette exception, une réponse « je n'ai pas l'information » se retrouve
+    # décorée d'une page sans rapport, puisque `sources` est non vide dès que la
+    # récupération rend quelque chose — et sans seuil de distance elle rend
+    # toujours quelque chose. Mesuré : 24 réponses sur 24 portaient une citation,
+    # refus compris. Le lecteur ne pouvait donc plus distinguer « ceci vient de la
+    # page citée » de « on a collé une source sous un refus ».
+    #
+    # ⚠️ Mesuré aussi : ce contrôle ne suffit PAS à garantir la fidélité. Sur des
+    # questions proches du domaine et sans réponse dans le corpus, le modèle a
+    # produit 5 fabrications sur 9, dont une fatwa et des opinions attribuées à
+    # des savants que le texte ne nomme pas — le tout correctement cité. Ce
+    # garde-fou enlève la citation trompeuse ; il ne remplace pas la vérification.
+    refuse = rag.est_un_refus(answer, language)
+    if sources and not refuse:
         label = "📄 Sources : " if language == "fr" else "📄 المصادر: "
         answer = f"{answer}\n\n{label}{rag.format_sources(sources, language)}"
         # 4. Ajoute les extraits (phrases) cités, avec leur référence
@@ -243,7 +257,7 @@ def ask(
     return {
         "question": question,
         "answer": answer,
-        "sources": sources,
+        "sources": [] if refuse else sources,
         "context_used": docs,
         "language": language,
     }
