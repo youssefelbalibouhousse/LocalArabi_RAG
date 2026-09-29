@@ -24,6 +24,27 @@ Les deux métriques
 Un reranker améliore rarement ``hit@k`` (il ne peut pas trouver ce que la
 récupération a raté) mais améliore presque toujours le MRR.
 
+Les deux populations
+--------------------
+Un jeu d'or ne contient pas que des questions auxquelles le corpus répond. Il en
+contient aussi dont la bonne réponse est : « il n'y a rien ». Elles s'écrivent
+``"expected": []``, et elles ne se mesurent pas de la même façon :
+
+* les questions **répondables** se notent par ``hit@k`` et ``MRR`` — le passage
+  attendu est-il retrouvé, et à quel rang ;
+* les questions **hors corpus** ne peuvent PAS se noter par un rang : il n'y a
+  aucun passage à retrouver, et la récupération rend toujours *k* chunks, même
+  pour une question qui ne concerne pas le corpus. Ce qui se mesure, c'est la
+  **distance du chunk le plus proche** : si elle reste basse alors que rien ne
+  répond, aucune distance ne distingue « le corpus répond » de « le corpus ne
+  répond pas » — et le seuil de distance de l'application est un réglage
+  introuvable. C'est précisément la question à laquelle ce harnais doit répondre
+  avant qu'on ose activer ce seuil.
+
+Mélanger les deux populations dans un même score n'aurait aucun sens : compter
+« hors corpus » comme « introuvable » punirait la bonne réponse du système, et
+l'ignorer ferait disparaître ce qu'on cherche justement à savoir.
+
 Pureté
 ------
 Ce module n'appelle ni ChromaDB ni Ollama, ne lit que les fichiers qu'on lui
@@ -100,6 +121,17 @@ class GoldenQuestion:
             "notes": self.notes,
         }
 
+    @property
+    def est_hors_corpus(self) -> bool:
+        """La bonne réponse à cette question est-elle « rien » ?
+
+        Écrite ``"expected": []``, elle vérifie que le système REFUSE de répondre
+        au lieu d'inventer. C'est la question qu'un utilisateur pose le plus
+        souvent sans le savoir : celle dont la réponse n'est pas dans les
+        documents.
+        """
+        return not self.expected
+
 
 def parse_expected(raw: Any, context: str) -> ExpectedSource:
     """Construit une source attendue à partir d'une entrée JSON."""
@@ -149,8 +181,17 @@ def parse_golden_line(line: str, number: int) -> GoldenQuestion | None:
         raise GoldenError(f"{context} : « id » doit être une chaîne.")
 
     expected_raw = raw.get("expected")
-    if not isinstance(expected_raw, list) or not expected_raw:
-        raise GoldenError(f"{context} : « expected » doit être une liste non vide.")
+    # Une liste VIDE est un choix délibéré (« le corpus ne doit pas répondre »),
+    # une clé ABSENTE est une erreur de rédaction : ne pas confondre les deux,
+    # sinon une question mal saisie passerait pour une question hors corpus et
+    # serait comptée comme un exercice de refus.
+    if expected_raw is None:
+        raise GoldenError(
+            f"{context} : « expected » est obligatoire. Utilisez ``[]`` pour une "
+            "question dont la réponse n'est PAS dans le corpus."
+        )
+    if not isinstance(expected_raw, list):
+        raise GoldenError(f"{context} : « expected » doit être une liste.")
 
     expected = tuple(
         parse_expected(item, f"{context}, expected[{index}]")
@@ -258,7 +299,14 @@ def est_orpheline(question: GoldenQuestion, sources_indexees: Collection[str]) -
     « introuvables » ferait chuter le score à cause d'un document retiré du
     corpus, et non de la qualité de la récupération — un faux signal, qui
     masquerait un vrai problème le jour où il apparaîtrait pour de bon.
+
+    ⚠️ Une question HORS CORPUS n'est jamais orpheline : elle n'attend aucune
+    source. Sans ce cas particulier, ``all([])`` vaut ``True`` et toutes les
+    questions de refus seraient silencieusement écartées de la mesure —
+    c'est-à-dire exactement celles qu'on vient mesurer.
     """
+    if question.est_hors_corpus:
+        return False
     return all(source.source not in sources_indexees for source in question.expected)
 
 
@@ -349,13 +397,25 @@ def corpus_fingerprint(identifiers: Iterable[str]) -> str:
 
 @dataclass(frozen=True)
 class QuestionResult:
-    """Résultat d'une question : à quel rang le bon passage est ressorti."""
+    """Résultat d'une question : à quel rang le bon passage est ressorti.
+
+    ``min_distance`` est la distance L2 du chunk le plus proche de la question,
+    relevée indépendamment de tout filtrage et de toute fusion. C'est la seule
+    grandeur qui ait un sens pour une question hors corpus, où il n'y a aucun
+    rang à trouver.
+
+    ``hors_corpus`` dit à quelle population la question appartient. Sans lui, un
+    rapport relu six mois plus tard serait impossible à interpréter : un ``rank``
+    à ``None`` signifierait tour à tour « échec » et « réussite ».
+    """
 
     question_id: str
     question: str
     rank: int | None
     latency_ms: float
     retrieved: tuple[dict[str, Any], ...] = ()
+    min_distance: float | None = None
+    hors_corpus: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Représentation JSON du résultat."""
@@ -364,6 +424,10 @@ class QuestionResult:
             "question": self.question,
             "rank": self.rank,
             "latency_ms": round(self.latency_ms, 1),
+            "min_distance": (
+                None if self.min_distance is None else round(self.min_distance, 4)
+            ),
+            "hors_corpus": self.hors_corpus,
             "retrieved": list(self.retrieved),
         }
 
@@ -384,26 +448,44 @@ class EvaluationReport:
 
     @property
     def count(self) -> int:
-        """Nombre de questions évaluées."""
+        """Nombre de questions évaluées (les deux populations confondues)."""
         return len(self.results)
 
     @property
+    def answerable(self) -> tuple[QuestionResult, ...]:
+        """Questions auxquelles le corpus DOIT répondre."""
+        return tuple(result for result in self.results if not result.hors_corpus)
+
+    @property
+    def hors_corpus(self) -> tuple[QuestionResult, ...]:
+        """Questions auxquelles le corpus ne peut PAS répondre."""
+        return tuple(result for result in self.results if result.hors_corpus)
+
+    @property
     def hits(self) -> int:
-        """Nombre de questions dont le bon passage est dans le top-k."""
-        return sum(1 for result in self.results if hit_at_k(result.rank, self.k))
+        """Nombre de questions répondables dont le bon passage est dans le top-k."""
+        return sum(1 for result in self.answerable if hit_at_k(result.rank, self.k))
 
     @property
     def hit_at_k(self) -> float:
-        """Part des questions retrouvées dans le top-k (entre 0 et 1)."""
-        return self.hits / self.count if self.count else 0.0
+        """Part des questions RÉPONDABLES retrouvées dans le top-k (entre 0 et 1).
+
+        Le dénominateur exclut les questions hors corpus : il n'y a rien à
+        retrouver pour elles, et les compter comme des échecs ferait dépendre le
+        score de la proportion de questions de refus qu'on a pris la peine
+        d'écrire.
+        """
+        total = len(self.answerable)
+        return self.hits / total if total else 0.0
 
     @property
     def mrr(self) -> float:
         """MRR@k : qualité du classement du premier résultat correct."""
-        if not self.count:
+        total = len(self.answerable)
+        if not total:
             return 0.0
-        total = sum(reciprocal_rank(result.rank, self.k) for result in self.results)
-        return total / self.count
+        somme = sum(reciprocal_rank(result.rank, self.k) for result in self.answerable)
+        return somme / total
 
     @property
     def mean_latency_ms(self) -> float:
@@ -414,8 +496,8 @@ class EvaluationReport:
 
     @property
     def misses(self) -> tuple[QuestionResult, ...]:
-        """Questions dont le bon passage n'a pas été retrouvé."""
-        return tuple(result for result in self.results if result.rank is None)
+        """Questions RÉPONDABLES dont le bon passage n'a pas été retrouvé."""
+        return tuple(result for result in self.answerable if result.rank is None)
 
     def to_dict(self) -> dict[str, Any]:
         """Représentation JSON complète, prête à écrire sur disque.
@@ -432,6 +514,8 @@ class EvaluationReport:
             "context": self.context,
             "summary": {
                 "count": self.count,
+                "answerable": len(self.answerable),
+                "hors_corpus": len(self.hors_corpus),
                 "ignored": len(self.ignored_ids),
                 "hit_at_k": round(self.hit_at_k, 4),
                 "mrr": round(self.mrr, 4),
@@ -451,6 +535,12 @@ class EvaluationReport:
                 rank=item.get("rank"),
                 latency_ms=float(item.get("latency_ms") or 0.0),
                 retrieved=tuple(item.get("retrieved") or ()),
+                min_distance=(
+                    None
+                    if item.get("min_distance") is None
+                    else float(item["min_distance"])
+                ),
+                hors_corpus=bool(item.get("hors_corpus", False)),
             )
             for item in data.get("results", [])
         )
@@ -520,15 +610,67 @@ def _rang_comparable(rank: int | None) -> float:
     return float("inf") if rank is None else float(rank)
 
 
+@dataclass(frozen=True)
+class DistancesPlusProches:
+    """Distribution de la distance L2 au chunk le plus proche.
+
+    C'est l'instrument qui décide si le seuil de distance de l'application est
+    réglable. Si les deux populations se recouvrent — une question hors corpus
+    peut avoir un chunk PLUS proche qu'une question répondable — alors aucun
+    seuil ne les sépare, et en activer un écarterait de vraies réponses.
+    """
+
+    nombre: int
+    minimum: float
+    mediane: float
+    maximum: float
+
+    def __str__(self) -> str:
+        return (
+            f"min {_nombre(self.minimum)}  médiane {_nombre(self.mediane)}  "
+            f"max {_nombre(self.maximum)}"
+        )
+
+
+def distances_plus_proches(
+    results: Sequence[QuestionResult],
+) -> DistancesPlusProches | None:
+    """Décrit la distance au plus proche sur une population, ou ``None``.
+
+    ``None`` signifie qu'aucune question de la population ne porte de distance :
+    c'est le cas d'un rapport écrit avant que cette mesure n'existe.
+    """
+    valeurs = sorted(
+        result.min_distance for result in results if result.min_distance is not None
+    )
+    if not valeurs:
+        return None
+    return DistancesPlusProches(
+        nombre=len(valeurs),
+        minimum=valeurs[0],
+        mediane=valeurs[len(valeurs) // 2],
+        maximum=valeurs[-1],
+    )
+
+
 def format_report(report: EvaluationReport) -> str:
     """Rend un rapport lisible dans un terminal."""
-    par_rang = [result.rank for result in report.results if result.rank is not None]
+    # Les rangs ne concernent que les questions répondables : une question hors
+    # corpus n'a pas de rang, et la compter « introuvable » serait un contresens.
+    par_rang = [result.rank for result in report.answerable if result.rank is not None]
     premier = sum(1 for rank in par_rang if rank == 1)
     ensuite = len(par_rang) - premier
     introuvables = len(report.misses)
 
     lignes = [
-        f"Évaluation « {report.label} » — {accorder(report.count, 'question')}, top-{report.k}"
+        f"Évaluation « {report.label} » — {accorder(report.count, 'question')}"
+        f" ({len(report.answerable)} répondable(s)"
+        + (
+            f", {len(report.hors_corpus)} hors corpus)"
+            if report.hors_corpus
+            else ")"
+        )
+        + f", top-{report.k}"
     ]
 
     if report.created_at:
@@ -540,7 +682,7 @@ def format_report(report: EvaluationReport) -> str:
     lignes += [
         "-" * 64,
         f"{'hit@' + str(report.k):<17}: {_pourcent(report.hit_at_k):>9}"
-        f"   ({report.hits}/{report.count})",
+        f"   ({report.hits}/{len(report.answerable)})",
         f"{'MRR@' + str(report.k):<17}: {_nombre(report.mrr):>9}",
         f"{'Latence moyenne':<17}: {report.mean_latency_ms:>6.0f} ms",
         "-" * 64,
@@ -548,6 +690,28 @@ def format_report(report: EvaluationReport) -> str:
         f"{'Rang 2 à ' + str(report.k):<17}: {ensuite:>9}",
         f"{'Introuvable':<17}: {introuvables:>9}",
     ]
+
+    # Le seuil de distance ne peut se régler que si les deux populations ne se
+    # recouvrent pas. C'est ce que ce bloc permet de voir d'un coup d'œil.
+    repondables = distances_plus_proches(report.answerable)
+    hors_corpus = distances_plus_proches(report.hors_corpus)
+    if repondables or hors_corpus:
+        lignes += ["", f"Distance L2 au chunk le plus proche (top-{report.k}) :"]
+        if repondables:
+            lignes.append(f"  répondables :  {repondables}  ({repondables.nombre})")
+        if hors_corpus:
+            lignes.append(f"  hors corpus :  {hors_corpus}  ({hors_corpus.nombre})")
+        if repondables and hors_corpus:
+            if hors_corpus.minimum <= repondables.maximum:
+                lignes.append(
+                    "  → Les deux populations SE RECOUVRENT : aucun seuil de distance\n"
+                    "    ne peut les séparer. En activer un écarterait de vraies réponses."
+                )
+            else:
+                lignes.append(
+                    "  → Populations séparées : un seuil autour de "
+                    f"{_nombre(hors_corpus.minimum)} les distinguerait."
+                )
 
     if report.ignored_ids:
         lignes += [
@@ -589,8 +753,12 @@ def format_comparison(before: EvaluationReport, after: EvaluationReport) -> str:
             "      alors les deux rapports sur le MÊME corpus."
         )
 
-    rangs_avant = {result.question_id: result.rank for result in before.results}
-    rangs_apres = {result.question_id: result.rank for result in after.results}
+    rangs_avant = {
+        result.question_id: result.rank for result in before.answerable
+    }
+    rangs_apres = {
+        result.question_id: result.rank for result in after.answerable
+    }
     communes = sorted(set(rangs_avant) & set(rangs_apres))
 
     if set(rangs_avant) != set(rangs_apres):
@@ -622,7 +790,7 @@ def format_comparison(before: EvaluationReport, after: EvaluationReport) -> str:
     lignes = [f"Comparaison « {before.label} » → « {after.label} »"]
     lignes.append(
         f"Questions communes : {len(communes)}"
-        f"  (avant : {before.count}, après : {after.count})"
+        f"  (avant : {len(before.answerable)}, après : {len(after.answerable)})"
     )
     lignes.append("-" * 64)
     lignes.append(f"{'':<17}{'avant':>10}{'après':>10}{'écart':>12}")
