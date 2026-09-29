@@ -12,6 +12,7 @@ Chaque réponse cite ses sources : fichier, page et intervalle de lignes.
 app/
 ├── config.py        # Configuration centralisée (chemins, modèles, URL)
 ├── rag.py           # Logique RAG : récupération + génération
+├── lexical.py       # Recherche lexicale (BM25) et fusion de classements
 ├── ingest.py        # Ingestion incrémentale et bornée (registre, lots)
 ├── epub.py          # Extraction des EPUB (corpus Shamela)
 ├── evaluation.py    # Mesure de la qualité de la récupération (hit@k, MRR)
@@ -318,11 +319,59 @@ non de la qualité de la récupération.
 > si le bon passage est absent du top-*k* (problème de découpage ou de modèle)
 > ou seulement mal classé (problème que le reranker résout).
 
+## Recherche hybride (lexicale + vectorielle)
+
+Chercher par le **sens** ne suffit pas sur ce corpus. Dans `تفسير ابن المنذر`,
+**85 % des chunks** sont des chaînes de transmetteurs (« حدّثنا فلان عن فلان ») :
+ils se ressemblent tous, et un vecteur les confond. Le symptôme est net — quatre
+questions du jeu d'or **citent un verset mot pour mot** ; l'index contenait ce
+verset, **à la page attendue**, et la recherche vectorielle ne l'a jamais
+renvoyé. La recherche lexicale, elle, le trouve au **rang 1**.
+
+Les deux recherches échouent différemment — BM25 ne comprend pas les
+paraphrases, le vecteur noie les termes rares — et c'est exactement pourquoi il
+faut les **fusionner** plutôt que d'en choisir une :
+
+| recherche | `hit@10` | `MRR@10` | introuvables | latence |
+|---|---|---|---|---|
+| vectorielle seule | 76,3 % | 0,52 | 14 | 340 ms |
+| **fusion (RRF)** | **89,8 %** | **0,61** | **6** | 333 ms |
+
+59 questions, 3 355 chunks, 3 ouvrages — **20 questions mieux classées, 1 moins
+bien**. La latence ne bouge pas : l'index inversé ne note que les documents
+contenant les mots de la question, pas les 3 355.
+
+```bash
+python scripts/eval_rag.py --run --label hybride      # fusion (défaut)
+HYBRID_ENABLED=false python scripts/eval_rag.py --run --label vectoriel
+python scripts/eval_rag.py --compare vectoriel hybride
+```
+
+Réglages (`.env`) : `HYBRID_ENABLED`, `HYBRID_CANDIDATES` (candidats demandés à
+chaque recherche avant fusion), `HYBRID_RRF_K` (constante d'aplatissement),
+`HYBRID_VECTOR_WEIGHT` / `HYBRID_LEXICAL_WEIGHT`.
+
+> ⚠️ **Pourquoi fusionner des RANGS et non des scores ?** Un score BM25 et une
+> distance vectorielle n'ont aucune unité commune : les additionner serait une
+> faute de dimension. Le rang, lui, est toujours un entier de 1 à N.
+
+⚠️ **L'index lexical est un cache dérivé de ChromaDB**, pas une seconde source de
+vérité — il est donc impossible qu'il « mente » comme a pu le faire le registre.
+Il est reconstruit quand le **nombre** de chunks change. Deux conséquences :
+
+- **Après une ré-ingestion, redémarrez l'API** (ou appelez
+  `rag.reinitialiser_index_lexical()`) : modifier le contenu d'un document sans
+  changer le nombre de chunks ne déclenche pas la reconstruction.
+- La mémoire croît avec le corpus (négligeable à 3 355 chunks — quelques Mo ;
+  à revoir vers plusieurs millions, où un index persistant prendrait le relais :
+  `SQLite FTS5` fournit un BM25 classé sans limite de mémoire).
+
 ## Choix techniques
 
 | Sujet | Décision |
 |---|---|
 | Configuration | `app/config.py` est la **source unique de vérité**, surchargeable par variables d'environnement |
+| Recherche | **Hybride** : recherche vectorielle ET lexicale (BM25), fusionnées par rangs réciproques. Mesuré : `hit@10` 76,3 % → **89,8 %**, sans coût de latence. Voir « Recherche hybride » ci-dessus |
 | Ingestion | **Incrémentale et non destructive** : empreinte SHA-256 du contenu, remplacement par document, écriture par lots bornés. Registre dans `data/app.db`. Un index refuse de mélanger deux modèles d'embedding. |
 | Retrait | **Explicite** (`--forget`) et jamais automatique : un fichier disparu du disque n'est pas retiré pour autant. La purge efface le registre **avant** l'index, comme l'ingestion, pour qu'une panne laisse le document repris plutôt qu'inscrit à tort. |
 | Passages longs | `--continue-on-error` poursuit malgré les échecs et les récapitule ; `--retries` réessaie les pannes passagères (réseau, redémarrage), jamais les erreurs permanentes |

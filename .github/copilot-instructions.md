@@ -12,6 +12,11 @@ sources (fichier, page, lignes). Voir `README.md` (usage) et `docs/DEPLOIEMENT.m
 - `app/rag.py` — logique RAG partagée (récupération, génération, formatage des
   sources). Les connexions (ChromaDB, client Ollama) sont **mises en cache** et
   chargées paresseusement : ne pas les recréer par requête.
+- `app/lexical.py` — recherche lexicale (BM25) et fusion de classements RRF.
+  Module **pur** (ni base ni modèle), comme `app/epub.py` : testable sans rien
+  lancer. La liste de mots vides et la longueur minimale font partie de la
+  configuration **mesurée** — les modifier invalide le tableau du README, et la
+  mesure doit être refaite avant de croire à un gain.
 - `app/main.py` — routes FastAPI. Le `StaticFiles` du frontend est monté **en
   dernier**, sinon il masquerait les routes de l'API.
 - `app/auth.py` — bcrypt + JWT. `scripts/build_kb.py` — ingestion des documents.
@@ -158,3 +163,21 @@ Reconstruire la base vectorielle : `python scripts/build_kb.py`
   `letter-spacing` sur de l'arabe** : l'espacement casse la liaison des lettres
   (الحروف المتصلة). La typographie arabe se règle par la hauteur de ligne (1.85 mini)
   et le choix de police, jamais par l'espacement des lettres.
+- **Recherche hybride** : `rag.retrieve()` mène une recherche vectorielle **et** une
+  recherche lexicale (BM25), puis les **fusionne par rangs réciproques** (`app/lexical.py`).
+  Mesuré sur 59 questions : `hit@10` 76,3 % → **89,8 %**, 20 questions mieux classées,
+  1 moins bien, **latence inchangée**. Pourquoi : dans `تفسير ابن المنذر`, 85 % des
+  chunks sont des chaînes de transmetteurs — le vecteur les confond, et quatre questions
+  citant un verset mot pour mot n'étaient **jamais** retrouvées alors que l'index
+  contenait ce verset **à la page attendue** (BM25 le trouve au rang 1).
+  Ne **jamais** fusionner des scores — un score BM25 et une distance L2 n'ont aucune
+  unité commune : uniquement des **rangs**. L'index lexical est un **cache dérivé** de
+  ChromaDB, jamais une seconde source de vérité ; il se reconstruit quand le **nombre**
+  de chunks change, donc **redémarrer l'API après une ré-ingestion** (modifier le contenu
+  sans changer le nombre ne le déclenche pas).
+- **Tokenisation arabe : ne jamais écrire la plage `\u0600-\u06FF` dans une expression
+  régulière.** Elle contient la ponctuation arabe — le « ؟ » final de chaque question se
+  collait au dernier mot, qui ne correspondait alors plus à rien, **sans aucun message**.
+  La liste de mots vides et la longueur minimale font partie de la configuration
+  **mesurée** : les modifier invalide le tableau du README, et la mesure doit être refaite
+  avant de croire à un gain.

@@ -193,17 +193,61 @@ def test_le_nom_revient_quand_l_ouvrage_change():
 
 
 class _FakeCollection:
-    """Collection minimale : `query` rend ce qu'on lui a préparé."""
+    """Collection minimale, fidèle à ce que `rag.retrieve` utilise réellement.
 
-    def __init__(self, documents, metadatas, distances=None):
-        self._resultat = {
-            "documents": [documents],
-            "metadatas": [metadatas],
-            "distances": [distances or [0.1] * len(documents)],
+    `retrieve` ne se contente plus d'appeler `query` : la recherche hybride lit
+    aussi `name`, `count` et `get` (pour construire l'index lexical). Un double
+    qui n'exposerait que `query` ne décrirait plus la vraie interface.
+    """
+
+    def __init__(self, documents, metadatas, distances=None, identifiants=None,
+                 name="fictive"):
+        self.name = name
+        self._documents = documents
+        self._metadatas = metadatas
+        self._distances = distances or [0.1] * len(documents)
+        self._identifiants = identifiants or [f"id-{i}" for i in range(len(documents))]
+
+    def count(self):
+        return len(self._documents)
+
+    def ajouter(self, document, meta, identifiant, distance=0.1):
+        """Ajoute un chunk au faux corpus, en tenant les quatre listes ensemble.
+
+        Les listes parallèles du double sont ce qui a déjà menti une fois : ajouter
+        un document sans sa distance faisait lever `zip(strict=True)` dans le code
+        de production. Une méthode unique évite d'avoir à y penser.
+        """
+        self._documents.append(document)
+        self._metadatas.append(meta)
+        self._identifiants.append(identifiant)
+        self._distances.append(distance)
+
+    def get(self, **kwargs):
+        return {
+            "ids": list(self._identifiants),
+            "documents": list(self._documents),
+            "metadatas": list(self._metadatas),
         }
 
     def query(self, **kwargs):
-        return self._resultat
+        return {
+            "ids": [list(self._identifiants)],
+            "documents": [list(self._documents)],
+            "metadatas": [list(self._metadatas)],
+            "distances": [list(self._distances)],
+        }
+
+
+def _meta(source, page, title=None):
+    """Un métadonnée de chunk, réduite à ce qui compte pour ces tests."""
+    return {
+        "source": source,
+        "title": title or source,
+        "page": page,
+        "line_start": 1,
+        "line_end": 5,
+    }
 
 
 def test_retrieve_transmet_le_titre_de_l_ouvrage():
@@ -228,6 +272,129 @@ def test_retrieve_transmet_le_titre_de_l_ouvrage():
     assert docs == ["texte"]
     assert sources[0]["title"] == "الاعتكاف"
     assert sources[0]["source"] == "12445.epub"
+
+
+# --- Recherche hybride ----------------------------------------------------
+#
+# Le cas reproduit ici est celui qui a motivé la fusion, mesuré sur le
+# `تفسير ابن المنذر` : la recherche vectorielle ne renvoie jamais le chunk qui
+# porte le verset, parce que celui-ci est noyé dans une chaîne de transmetteurs.
+# Le chunk est pourtant dans l'index, à la bonne page.
+
+CHAINE = "حدثنا علي بن المبارك قال حدثنا زيد بن ثور عن ابن جريج"
+
+
+def _corpus_hybride():
+    """Un faux corpus où le verset n'arrive qu'en bas du classement vectoriel."""
+    documents = [
+        f"{CHAINE} في تفسير اية الدين والمعاملات والبيوع",
+        f"{CHAINE} في تفسير اية الوضوء والصلوات والخيول",
+        f"{CHAINE} ثم صرفكم عنهم ليبتليكم قال يعني بذلك يوم احد",
+    ]
+    metadatas = [
+        _meta("22549.epub", 11, "تفسير ابن المنذر"),
+        _meta("22549.epub", 12, "تفسير ابن المنذر"),
+        _meta("22549.epub", 446, "تفسير ابن المنذر"),
+    ]
+    return _FakeCollection(documents, metadatas, name="hybride")
+
+
+def test_la_recherche_hybride_sauve_le_passage_que_le_vecteur_ignore():
+    """Le cœur de la fonctionnalité, et sa raison d'être.
+
+    La recherche vectorielle classe le verset en DERNIER (c'est le classement que
+    le faux lui prête). Sans fusion, l'extrait serait le 3e des 5 rendus… ou pas
+    rendu du tout si le bassin était plus étroit. La fusion doit le remonter.
+    """
+    collection = _corpus_hybride()
+
+    docs, sources = rag.retrieve(collection, "ما معنى ثم صرفكم عنهم ليبتليكم", n_results=1)
+
+    assert len(sources) == 1
+    assert sources[0]["page"] == 446
+    assert "ليبتليكم" in docs[0]
+
+
+def test_la_recherche_hybride_ne_rend_que_le_nombre_demande():
+    """La fusion élargit le bassin, elle ne change pas ce qui est montré au modèle."""
+    collection = _corpus_hybride()
+
+    docs, sources = rag.retrieve(collection, "تفسير اية الدين", n_results=2)
+
+    assert len(docs) == len(sources) == 2
+
+
+def test_la_recherche_vectorielle_seule_reste_disponible(monkeypatch):
+    """`HYBRID_ENABLED=false` doit rendre exactement l'ancien comportement.
+
+    C'est ce qui permet de comparer les deux mesures, et de revenir en arrière
+    sans redéployer — le drapeau existe pour être utilisé.
+    """
+    monkeypatch.setattr(config, "HYBRID_ENABLED", False)
+    collection = _corpus_hybride()
+
+    docs, sources = rag.retrieve(collection, "ما معنى ثم صرفكم عنهم ليبتليكم", n_results=1)
+
+    # Classement vectoriel seul : le verset est le dernier du faux corpus.
+    assert sources[0]["page"] == 11
+    assert "ليبتليكم" not in docs[0]
+
+
+def test_l_index_lexical_est_reconstruit_quand_le_corpus_change():
+    """Un cache qui ne se rafraîchit pas servirait un corpus qui n'existe plus."""
+    rag.reinitialiser_index_lexical()
+    collection = _corpus_hybride()
+    rag.retrieve(collection, "تفسير اية الدين")
+    avant = rag._index_lexical.taille
+
+    collection.ajouter("نص جديد عن الزكاة والصدقات", _meta("22549.epub", 900), "id-3")
+
+    rag.retrieve(collection, "تفسير اية الدين")
+
+    assert avant == 3
+    assert rag._index_lexical.taille == 4
+
+
+def test_le_seuil_de_distance_ecarte_les_candidats_vectoriels(monkeypatch):
+    """`DISTANCE_THRESHOLD` continue de filtrer la moitié vectorielle.
+
+    Le seuil juge une distance ; BM25 n'en produit pas. Il ne peut donc
+    s'appliquer qu'avant la fusion, aux candidats vectoriels.
+    """
+    monkeypatch.setattr(config, "HYBRID_ENABLED", False)
+    monkeypatch.setattr(config, "DISTANCE_THRESHOLD", 0.5)
+    collection = _FakeCollection(
+        documents=["proche", "lointain"],
+        metadatas=[_meta("12445.epub", 1), _meta("12445.epub", 2)],
+        distances=[0.2, 0.9],
+    )
+
+    docs, sources = rag.retrieve(collection, "سؤال")
+
+    assert docs == ["proche"]
+    assert len(sources) == 1
+
+
+def test_l_index_lexical_est_reconstruit_apres_reinitialisation():
+    """`reinitialiser_index_lexical` doit vraiment oublier, puis se reconstruire.
+
+    C'est le geste à faire après une ré-ingestion : sans lui, la moitié lexicale
+    de la recherche décrirait l'ancien corpus pendant que la moitié vectorielle
+    décrit le nouveau.
+    """
+    collection = _corpus_hybride()
+    rag.retrieve(collection, "تفسير اية الدين")
+    assert rag._index_lexical is not None
+
+    rag.reinitialiser_index_lexical()
+
+    assert rag._index_lexical is None
+    assert rag._extraits == {}
+
+    rag.retrieve(collection, "تفسير اية الدين")
+
+    assert rag._index_lexical.taille == 3
+    assert len(rag._extraits) == 3
 
 
 # --- Formatage des extraits ----------------------------------------------

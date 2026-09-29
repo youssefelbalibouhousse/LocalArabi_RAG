@@ -141,6 +141,60 @@ if EMBEDDING_TIMEOUT < 1:
 # ne sont pas calibrées). Exemple d'activation : DISTANCE_THRESHOLD=1.0
 DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "-1"))
 
+# --- Recherche hybride (lexicale + vectorielle) ---------------------------
+#
+# POURQUOI elle existe, mesuré le 29/09 sur les 59 questions du jeu d'or :
+#
+#   | recherche            | hit@10 | MRR@10 |
+#   |----------------------|--------|--------|
+#   | vectorielle seule    | 76,3 % | 0,53   |
+#   | lexicale seule       | 72,9 % | 0,55   |
+#   | fusion (les deux)    | 88,1 % | 0,62   |
+#
+# La cause est identifiable question par question. Dans `تفسير ابن المنذر`,
+# 85 % des chunks sont des chaînes de transmetteurs (« حدّثنا… عن… ») : un chunk
+# qui contient le verset cherché PLUS deux cents mots de formule ressemble, vu
+# du vecteur, à n'importe quel autre chunk de transmission. Quatre questions
+# citaient un verset mot pour mot ; l'index contenait ce verset, à la page
+# attendue, et la recherche vectorielle ne l'a JAMAIS renvoyé — la recherche
+# lexicale le trouve au rang 1.
+#
+# Les deux recherches échouent différemment, et c'est ce qui justifie de les
+# FUSIONNER plutôt que d'en choisir une : BM25 ne comprend pas les paraphrases,
+# le vecteur noie les termes rares.
+HYBRID_ENABLED = _env_flag("HYBRID_ENABLED", True)
+
+# Candidats demandés à chaque recherche avant fusion. La fusion ne peut pas
+# classer ce qu'on ne lui a pas donné : borner à `N_RESULTS` (5) reviendrait à
+# ne fusionner que les 5 premiers de chaque liste, et à perdre le passage que
+# l'un des deux trouve au rang 40.
+HYBRID_CANDIDATES = int(os.getenv("HYBRID_CANDIDATES", "50"))
+
+# Constante d'aplatissement de la fusion RRF, et poids relatifs.
+# Mesurés sur une grille (constante × poids) : le gain est de 79,7 % à 88,1 %
+# sur toute la grille, donc large, et non un pic dû au hasard. Le vecteur pèse
+# plus lourd parce qu'il répond seul aux questions formulées autrement que le
+# texte (cas majoritaire) ; le lexical tranche sur les citations exactes.
+HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
+HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "3.0"))
+HYBRID_LEXICAL_WEIGHT = float(os.getenv("HYBRID_LEXICAL_WEIGHT", "1.0"))
+
+if HYBRID_CANDIDATES < 1:
+    raise ValueError(
+        f"HYBRID_CANDIDATES={HYBRID_CANDIDATES} est invalide : la valeur doit être >= 1."
+    )
+
+if HYBRID_RRF_K < 1:
+    raise ValueError(
+        f"HYBRID_RRF_K={HYBRID_RRF_K} est invalide : la valeur doit être >= 1."
+    )
+
+if HYBRID_VECTOR_WEIGHT <= 0 or HYBRID_LEXICAL_WEIGHT <= 0:
+    raise ValueError(
+        "Les poids de la recherche hybride doivent être strictement positifs "
+        f"(reçu : {HYBRID_VECTOR_WEIGHT} et {HYBRID_LEXICAL_WEIGHT})."
+    )
+
 # CORS : origines autorisées par le navigateur.
 # "*" en développement ; en production, mettre l'URL du front
 # (ex. CORS_ALLOW_ORIGINS="https://mon-site.com,https://www.mon-site.com").

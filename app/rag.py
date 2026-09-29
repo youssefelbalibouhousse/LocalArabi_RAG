@@ -15,6 +15,7 @@ from chromadb.utils.embedding_functions.ollama_embedding_function import (
 
 from app import config
 from app.language import detect_language
+from app.lexical import IndexLexical, fusionner_rrf
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,68 @@ _client = None
 _collection = None
 _ollama_client = None
 _openai_client = None
+
+# --- Recherche hybride : index lexical -----------------------------------
+#
+# L'index lexical est DÉRIVÉ de l'index vectoriel : les mêmes chunks, lus dans
+# ChromaDB. Ce n'est pas une seconde source de vérité, seulement un cache —
+# c'est ce qui le rend sûr. Une source de vérité peut mentir (ce projet en a
+# fait l'expérience avec le registre) ; un cache, lui, se reconstruit.
+#
+# ⚠️ LIMITE CONNUE — la reconstruction est déclenchée par un changement du
+# NOMBRE de chunks. Modifier le CONTENU d'un document sans changer ce nombre
+# (ce que `build_kb.py --force` peut produire) laisserait l'index lexical sur
+# l'ancien texte : les deux moitiés de la recherche ne décriraient plus le même
+# corpus. Remède : redémarrer l'API après une ré-ingestion, ou appeler
+# `reinitialiser_index_lexical()`. Documenté dans `README.md`.
+_index_lexical: IndexLexical | None = None
+_etat_index_lexical: tuple[str | None, int] | None = None
+_extraits: dict[str, tuple[str, Mapping]] = {}
+
+
+def reinitialiser_index_lexical() -> None:
+    """Oublie l'index lexical : il sera reconstruit au prochain appel.
+
+    Utile après une ré-ingestion, ou entre deux tests qui se succèdent sur des
+    corpus différents.
+    """
+    global _index_lexical, _etat_index_lexical
+    _index_lexical = None
+    _etat_index_lexical = None
+    _extraits.clear()
+
+
+def _index_lexical_a_jour(collection) -> IndexLexical:
+    """Retourne l'index lexical des chunks de la collection, en le construisant au besoin.
+
+    Coût assumé : la première requête qui suit un démarrage (ou un changement
+    de corpus) lit toute la collection en mémoire. Les suivantes ne paient
+    rien. Pour 3 355 chunks c'est quelques dixièmes de seconde ; pour un corpus
+    de plusieurs millions de chunks, il faudra un index persistant à la place
+    (voir la note de passage à l'échelle dans `README.md`).
+
+    La garde est le COUPLE (nom de collection, nombre de chunks) : une
+    ingestion ajoute ou retire des chunks, le compte change, l'index est refait.
+    """
+    global _index_lexical, _etat_index_lexical
+
+    etat = (getattr(collection, "name", None), collection.count())
+    if _index_lexical is not None and _etat_index_lexical == etat:
+        return _index_lexical
+
+    resultat = collection.get(include=["documents", "metadatas"])
+    _extraits.clear()
+    for identifiant, document, meta in zip(
+        resultat["ids"], resultat["documents"], resultat["metadatas"], strict=True
+    ):
+        _extraits[identifiant] = (document or "", meta or {})
+
+    _index_lexical = IndexLexical(
+        (identifiant, extrait[0]) for identifiant, extrait in _extraits.items()
+    )
+    _etat_index_lexical = etat
+    logger.info("Index lexical construit : %d chunks.", _index_lexical.taille)
+    return _index_lexical
 
 
 def get_embedding_function():
@@ -88,6 +151,20 @@ def get_openai_client():
     return _openai_client
 
 
+def _source_de(meta: Mapping) -> dict:
+    """La description d'un extrait, telle qu'elle remonte jusqu'à la citation."""
+    return {
+        # `source` (le nom de fichier) reste la CLÉ : c'est lui que le registre,
+        # l'index et le jeu d'or connaissent. `title` n'est là que pour
+        # l'AFFICHAGE, et il peut manquer — un PDF n'en apporte pas.
+        "source": meta.get("source"),
+        "title": meta.get("title"),
+        "page": meta.get("page"),
+        "line_start": meta.get("line_start"),
+        "line_end": meta.get("line_end"),
+    }
+
+
 def retrieve(collection, question, n_results=None):
     """Récupère les chunks les plus proches de la question.
 
@@ -95,10 +172,20 @@ def retrieve(collection, question, n_results=None):
     son titre, la page et l'intervalle de lignes. Le titre sert à NOMMER
     l'ouvrage dans la citation (voir `etiquette_source`) ; le nom de fichier
     reste la clé d'identification.
+
+    Deux recherches sont menées puis FUSIONNÉES quand `config.HYBRID_ENABLED`
+    est vrai (voir `app/lexical.py` pour les mesures qui le justifient).
     """
     if n_results is None:
         n_results = config.N_RESULTS
 
+    if not config.HYBRID_ENABLED:
+        return _retrieve_vectoriel(collection, question, n_results)
+    return _retrieve_hybride(collection, question, n_results)
+
+
+def _retrieve_vectoriel(collection, question, n_results):
+    """Recherche vectorielle seule — le comportement d'avant la fusion."""
     results = collection.query(
         query_texts=[question],
         n_results=n_results,
@@ -120,18 +207,70 @@ def retrieve(collection, question, n_results=None):
         if threshold > 0 and distance is not None and distance > threshold:
             continue
         filtered_docs.append(doc)
-        sources.append({
-            # `source` (le nom de fichier) reste la CLÉ : c'est lui que le
-            # registre, l'index et le jeu d'or connaissent. `title` n'est là que
-            # pour l'AFFICHAGE, et il peut manquer — un PDF n'en apporte pas.
-            "source": meta.get("source"),
-            "title": meta.get("title"),
-            "page": meta.get("page"),
-            "line_start": meta.get("line_start"),
-            "line_end": meta.get("line_end"),
-        })
+        sources.append(_source_de(meta))
 
     return filtered_docs, sources
+
+
+def _retrieve_hybride(collection, question, n_results):
+    """Recherche vectorielle ET lexicale, fusionnées par rangs réciproques.
+
+    Le bassin de candidats est plus large que ce qu'on rendra : la fusion ne
+    peut pas classer ce qu'on ne lui a pas donné. Rendre les `n_results`
+    derniers après avoir demandé 50 candidats à chaque recherche, c'est laisser
+    chacune des deux retrouver le passage qu'elle seule connaît.
+
+    ⚠️ `DISTANCE_THRESHOLD` ne s'applique qu'aux candidats VECTORIELS, avant la
+    fusion : un extrait écarté pour distance peut revenir si la recherche
+    lexicale le place bien. C'est cohérent (le seuil juge une distance, et BM25
+    n'en produit pas), mais cela mérite d'être su avant de l'activer.
+    """
+    bassin = max(config.HYBRID_CANDIDATES, n_results)
+
+    results = collection.query(
+        query_texts=[question],
+        n_results=bassin,
+        include=["documents", "metadatas", "distances"],
+    )
+
+    threshold = config.DISTANCE_THRESHOLD
+    identifiants_vectoriels = []
+    for doc, meta, identifiant, distance in zip(
+        results["documents"][0],
+        results["metadatas"][0],
+        results["ids"][0],
+        results["distances"][0],
+        strict=True,
+    ):
+        if not meta:
+            continue
+        if threshold > 0 and distance is not None and distance > threshold:
+            continue
+        identifiants_vectoriels.append(identifiant)
+        # Les extraits vus par la recherche vectorielle sont mémorisés : si
+        # l'index lexical date d'avant une ingestion, la fusion peut désigner un
+        # identifiant qu'il ne connaît pas encore.
+        _extraits.setdefault(identifiant, (doc or "", meta))
+
+    index = _index_lexical_a_jour(collection)
+    identifiants_lexicaux = index.classer(question, bassin)
+
+    ordre = fusionner_rrf(
+        [identifiants_vectoriels, identifiants_lexicaux],
+        [config.HYBRID_VECTOR_WEIGHT, config.HYBRID_LEXICAL_WEIGHT],
+        config.HYBRID_RRF_K,
+        n_results,
+    )
+
+    docs, sources = [], []
+    for identifiant in ordre:
+        extrait = _extraits.get(identifiant)
+        if extrait is None or not extrait[1]:
+            continue
+        docs.append(extrait[0])
+        sources.append(_source_de(extrait[1]))
+
+    return docs, sources
 
 
 def build_prompt(question, context, language="ar"):

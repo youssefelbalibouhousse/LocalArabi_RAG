@@ -11,9 +11,23 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app import main
+from app import main, rag
 from app.database import get_session
 from app.ratelimit import RateLimit
+
+
+@pytest.fixture(autouse=True)
+def reset_index_lexical():
+    """Vide le cache de l'index lexical avant et après chaque test.
+
+    Cet index est un cache GLOBAL au processus. Sans cette remise à zéro, un test
+    hériterait du corpus du test précédent et son résultat dépendrait de l'ordre
+    d'exécution — le pire défaut possible pour une suite de tests, puisqu'il ne
+    se voit qu'un jour sur deux.
+    """
+    rag.reinitialiser_index_lexical()
+    yield
+    rag.reinitialiser_index_lexical()
 
 
 @pytest.fixture(autouse=True)
