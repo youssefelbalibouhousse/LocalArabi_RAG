@@ -338,52 +338,105 @@ elle serait comptée réussie quel que soit son résultat.
 Les deux populations ne se mesurent pas de la même façon, et le rapport les
 sépare. Une question hors corpus **n'a pas de rang** : la récupération rend
 toujours *k* chunks, même hors sujet. Ce qui se mesure, c'est la **distance du
-chunk le plus proche** — et c'est elle qui dit si le seuil de distance de
-l'application est réglable :
+chunk le plus proche** :
 
 | | min | médiane | max |
 |---|---|---|---|
 | 59 questions répondables | 0,26 | 0,38 | **0,52** |
-| 15 questions hors corpus | **0,54** | 0,61 | 0,67 |
+| 24 questions hors corpus | **0,41** | 0,58 | 0,67 |
 
-**Les deux populations ne se recouvrent pas** sur cette mesure — le seuil
-(`DISTANCE_THRESHOLD`, aujourd'hui désactivé) serait donc calibrable autour de
-0,53. ⚠️ Mais la marge est de **0,02**, et elle repose sur deux extrêmes, les
-statistiques les moins stables qui soient : 74 questions ne suffisent pas à
-adopter ce seuil. À vérifier sur un jeu hors corpus plus large avant d'y toucher.
+### ⚠️ La distance ne sépare PAS « hors sujet » de « réponse absente »
 
-### Le refus ne se mesure pas par une phrase
+Une première série de 15 questions hors corpus donnait des distances **toutes
+supérieures** à 0,53, et une population répondable plafonnant à 0,52 : les deux
+semblaient séparées, et le seuil `DISTANCE_THRESHOLD` calibrable. **C'était une
+illusion due à des questions trop faciles** — astronomie, cuisine, football, très
+loin du sujet.
 
-Les 15 questions hors corpus ont été passées dans le chemin de production réel
-(récupération → génération → assemblage). Résultat lu et classé à la main :
+Les 9 questions ajoutées ensuite sont du **même domaine** que le corpus : elles
+portent sur des réalités modernes (avion, assurance, monnaie électronique, don
+d'organes) que ces ouvrages ne peuvent pas trancher, mais leur vocabulaire est
+celui du corpus. Leur distance tombe **en plein milieu** des questions
+répondables :
 
-| | nombre |
+| question (réponse absente du corpus) | distance |
 |---|---|
-| refus corrects | **12 / 15** |
-| **fabrications** | **3 / 15** |
+| الصلاة في الطائرة | 0,414 |
+| التبرع بالأعضاء | 0,422 |
+| حقنة في الوريد | 0,425 |
+| بيع الأسهم في البورصة | 0,481 |
+| العمل في البنوك | 0,491 |
+| التأمين على السيارات | 0,513 |
 
-Les trois fabrications sont du pire type : à « en quelle année est tombé le mur
-de Berlin ? » le système répond « **1989** », et à « qui a gagné la Coupe du monde
-1998 ? » il répond « **la France** » — deux faits exacts, tirés de la mémoire du
-modèle et non du corpus, puis décorés d'une citation vers une page qui parle d'un
-sultan ottoman.
+**Conclusion : la distance mesure la proximité de SUJET, pas la présence d'une
+RÉPONSE.** Aucun seuil ne les distingue — le rapport le dit désormais lui-même
+(« les deux populations SE RECOUVRENT »). Un seuil assez haut pour laisser passer
+ces questions ne protège de rien ; un seuil assez bas pour les écarter
+supprimerait 10 vraies réponses sur 59.
 
-> ⚠️ **Un détecteur automatique de refus s'est trompé, et c'est le résultat le
-> plus utile de cette mesure.** En cherchant la phrase exacte du prompt, il
-> comptait **5 refus sur 15** là où il y en a 12 : il manquait les reformulations
-> arabes (« لا توجد الإجابة في السياق المستخرج ») et butait sur une apostrophe
-> en français. **Un taux de refus mesuré par correspondance de phrase est faux**,
-> et il l'est dans le sens rassurant — il fait croire au pire. Cette mesure
-> demande un juge, ou une lecture.
+C'est la population qui compte pour un pilote : la question a l'air normale, et
+c'est précisément là que le système invente le plus.
 
-⚠️ **Structurel, et indépendant du modèle** : les sources sont ajoutées à la
-réponse **dès que la récupération a rendu quelque chose** (`app/main.py`). Comme
-`DISTANCE_THRESHOLD` est désactivé, elle rend toujours quelque chose : **15
-réponses sur 15 portaient une citation**, refus compris. L'utilisateur ne peut
-donc pas distinguer « ceci vient de la page citée » de « le système a refusé et on
-a collé des sources sans rapport dessous ». C'est le point à corriger en priorité
-pour un pilote — et la séparation des distances ci-dessus montre qu'on a de quoi
-le faire.
+### Ce que le système fait vraiment, sur 24 questions sans réponse
+
+Passées dans le chemin de production réel (récupération → génération →
+assemblage), puis **lues une par une** :
+
+| | questions éloignées | questions proches du domaine |
+|---|---|---|
+| refus corrects | **12 / 15** | **4 / 9** |
+| **fabrications** | 3 / 15 | **5 / 9** |
+
+**Plus la question ressemble au corpus, plus le système invente** — et ses
+inventions sont mieux déguisées. Les cas graves, tous cités correctement :
+
+- « en quelle année est tombé le mur de Berlin ? » → « **1989** » ; « qui a gagné
+  la Coupe du monde 1998 ? » → « **la France** » : des faits exacts, tirés de la
+  mémoire du modèle et non du texte.
+- « هل يفطر الصائم بأخذ حقنة في الوريد؟ » → « **لا شيء عليه.** » — une **fatwa**,
+  appuyée sur un passage qui parle du vomi.
+- « ما حكم العمل في البنوك؟ » → « **لا بأس بأن يعمل في البنوك.** » — une
+  permission que le texte n'énonce nulle part.
+- « ما حكم استخدام مكبر الصوت في الأذان؟ » → « يرى بعض المحققين… » — des **opinions
+  attribuées à des savants que le texte ne nomme pas**.
+
+> ⚠️ **Un détecteur automatique de refus s'est trompé deux fois, et c'est le
+> résultat le plus utile de cette mesure.** En cherchant la phrase exacte de
+> l'invite, il a compté 5 refus sur 15 là où une lecture en trouve 12, puis 2 sur 9
+> là où il y en a 4 : il manquait les reformulations arabes (« لا توجد الإجابة في
+> السياق المستخرج ») et butait sur une apostrophe française. **Un taux de refus
+> mesuré par correspondance de phrase est faux**, et il l'est dans le sens
+> rassurant. Cette mesure demande un juge, ou une lecture.
+
+### Une invite durcie a été essayée, puis retirée
+
+Quatre règles numérotées ont été ajoutées, interdisant explicitement d'inférer, de
+faire des analogies et d'attribuer des opinions absentes. Résultat mesuré sur les
+9 questions proches du domaine : **1 refus sur 9, contre 4 sur 9 avant**. Et la
+forme des réponses a changé — elles sont devenues des fatwas courtes et
+assertives (« لا يجوز بيع الأسهم في البورصة. »), là où l'invite précédente faisait
+au moins citer le corpus.
+
+**Ajouter des interdictions a rendu le modèle plus assertif, pas plus fidèle.**
+L'invite a été rétablie, et l'expérience est consignée dans `app/rag.py`.
+
+> Réserve honnête : une exécution de chaque côté, et le modèle est stochastique.
+> Le changement de *forme* est net sur 6 questions sur 9, mais un protocole qui
+> tranche devrait mesurer **plusieurs exécutions par question**.
+
+### Ce qui a été corrigé : plus de citation sous un refus
+
+Les sources étaient ajoutées **dès que la récupération rendait quelque chose**
+(`app/main.py`) — et sans seuil de distance, elle rend toujours quelque chose :
+**24 réponses sur 24 portaient une citation, refus compris**. Le lecteur ne pouvait
+donc pas distinguer « ceci vient de la page citée » de « on a collé une source sans
+rapport sous un refus ».
+
+`rag.est_un_refus()` reconnaît les formules de refus **réellement observées** et
+supprime alors la citation — de la réponse comme du champ `sources` de l'API.
+
+⚠️ Ce garde-fou **n'empêche pas d'inventer** : il enlève une citation trompeuse. La
+fidélité de la génération reste un problème ouvert, mesuré ci-dessus.
 
 ## Recherche hybride (lexicale + vectorielle)
 
