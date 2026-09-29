@@ -54,6 +54,62 @@ def test_chunk_pages_produit_des_intervalles_de_lignes_contigus():
         assert suivant["line_start"] == precedent["line_end"] + 1
 
 
+def test_chunk_pages_ne_depasse_jamais_la_taille_cible():
+    """`chunk_size` est un MAXIMUM, pas une préférence.
+
+    Mesuré sur le corpus réel : « الأوسط » contient une ligne de 15 870
+    caractères, qui produisait un chunk de 15 870 caractères — 26 fois la
+    cible. Un tel chunk dépasse la fenêtre du modèle d'embedding, qui tronque
+    en silence : le vecteur ne représente alors que le début du texte.
+    """
+    enorme = " ".join(f"mot{i}" for i in range(600))
+
+    chunks = build_kb.chunk_pages([(1, f"courte\n{enorme}\nautre")], chunk_size=100)
+
+    assert max(len(c["text"]) for c in chunks) <= 100
+
+
+def test_une_ligne_decoupee_garde_son_numero_d_origine():
+    """Découper ne doit pas DÉCALER la numérotation : sinon la citation ne
+    désigne plus le bon endroit du livre."""
+    enorme = " ".join(f"mot{i}" for i in range(200))
+
+    chunks = build_kb.chunk_pages([(1, f"premiere\n{enorme}\nderniere")], chunk_size=80)
+
+    morceaux = [c for c in chunks if "mot" in c["text"]]
+    assert len(morceaux) > 1, "la ligne énorme doit être découpée"
+    # Aucun morceau ne peut prétendre venir d'ailleurs que de la ligne 2. Le
+    # dernier peut déborder sur la ligne 3 s'il reste de la place — il doit
+    # alors l'annoncer, et c'est justement ce que cette assertion vérifie.
+    assert all(c["line_start"] <= 2 <= c["line_end"] for c in morceaux)
+    assert morceaux[0]["line_start"] == 2
+    # La première et la dernière ligne gardent leurs numéros à elles.
+    assert chunks[0]["line_start"] == 1
+    assert chunks[-1]["line_end"] == 3
+
+
+def test_decouper_ligne_ne_coupe_pas_au_milieu_d_un_mot():
+    ligne = " ".join(f"mot{i}" for i in range(50))
+
+    morceaux = build_kb.decouper_ligne(ligne, 40)
+
+    assert all(len(morceau) <= 40 for morceau in morceaux)
+    assert all(morceau == morceau.strip() for morceau in morceaux)
+    assert " ".join(morceaux) == ligne
+
+
+def test_decouper_ligne_coupe_quand_meme_sans_espace():
+    """Un « mot » plus long que la cible doit être coupé, faute de mieux : ne
+    pas le couper laisserait le chunk dépasser la fenêtre du modèle."""
+    morceaux = build_kb.decouper_ligne("a" * 250, 100)
+
+    assert [len(morceau) for morceau in morceaux] == [100, 100, 50]
+
+
+def test_decouper_ligne_laisse_une_ligne_courte_intacte():
+    assert build_kb.decouper_ligne("texte court", 100) == ["texte court"]
+
+
 # --- Formatage des sources -----------------------------------------------
 
 SOURCE = [{"source": "a.pdf", "page": 5, "line_start": 1, "line_end": 9}]

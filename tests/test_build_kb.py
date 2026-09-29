@@ -341,9 +341,26 @@ def test_forget_ne_touche_pas_aux_autres_documents(index, tmp_path, monkeypatch)
     assert index.chunks != {}
 
 
-def test_forget_refuse_un_document_absent_du_registre(index, capsys):
+def test_forget_refuse_un_document_vraiment_absent(index, capsys):
+    """Ni ligne au registre ni chunk dans l'index : il n'y a effectivement rien
+    à retirer, et c'est probablement une faute de frappe."""
     assert build_kb.oublier_un_document("jamais-vu.pdf") == 1
-    assert "pas au registre" in capsys.readouterr().out
+    assert "rien à retirer" in capsys.readouterr().out
+
+
+def test_forget_purge_un_document_partiel(index, tmp_path, monkeypatch, capsys):
+    """Une ingestion interrompue laisse des chunks SANS ligne au registre : elle
+    efface le registre AVANT d'écrire. Refuser de les retirer serait le
+    raisonnement à l'envers — il y a bel et bien quelque chose à enlever, et
+    rien d'autre ne le fera, puisque aucun passage ne repasse sur un document
+    qui échoue."""
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    index.chunks["cours.pdf::chunk_0"] = ("texte", {"source": "cours.pdf"})
+
+    assert build_kb.oublier_un_document("cours.pdf") == 0
+
+    assert index.chunks == {}
+    assert "ingestion partielle" in capsys.readouterr().out
 
 
 def test_forget_avertit_si_le_fichier_est_encore_dans_le_corpus(
@@ -448,6 +465,108 @@ def test_status_reste_muet_quand_tout_concorde(index, tmp_path, monkeypatch, cap
     assert "⚠️" not in sortie
 
 
+def test_status_signale_un_document_jamais_ingere(index, tmp_path, monkeypatch, capsys):
+    """Présent dans le corpus mais absent de l'index ET du registre : sans ce
+    signal, `--status` conclut « concordent » alors qu'un ouvrage manque
+    entièrement. Deux zéros se ressemblent."""
+    (tmp_path / "cours.pdf").write_bytes(b"%PDF-1.4 faux")
+    monkeypatch.setattr(config, "CORPUS_DIRS", (tmp_path,))
+    monkeypatch.setattr(build_kb, "create_db_and_tables", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["build_kb.py", "--status"])
+
+    assert build_kb.main() == 0
+
+    sortie = capsys.readouterr().out
+    assert "non ingéré" in sortie
+    assert "TOTALEMENT absent" in sortie
+    assert "concordent" not in sortie
+
+
+# --- Recette du découpage -------------------------------------------------
+
+def test_une_collection_neuve_recoit_la_recette(index):
+    """Une collection vide ne peut pas périmer : on inscrit la recette."""
+    assert index.metadata == {"embedding_model": config.EMBEDDING_MODEL}
+
+    build_kb.ensure_decoupage(index)
+
+    assert index.metadata["chunk_size"] == config.CHUNK_SIZE
+    assert index.metadata["pipeline_version"] == build_kb.PIPELINE_VERSION
+    # La recette s'ajoute, elle ne remplace pas le modèle déjà inscrit.
+    assert index.metadata["embedding_model"] == config.EMBEDDING_MODEL
+
+
+def test_un_index_peuple_ne_recoit_pas_une_recette_non_prouvee(index, capsys):
+    """Inscrire la recette du code ferait taire l'avertissement alors que les
+    chunks, eux, n'ont pas bougé : le signal doit durer tant que le doute dure."""
+    indexer(index, "cours.pdf")
+
+    build_kb.ensure_decoupage(index)
+
+    assert "chunk_size" not in index.metadata
+    assert "ne confirme pas son découpage" in capsys.readouterr().out
+
+
+def test_l_avertissement_se_repete_a_chaque_passage(index, capsys):
+    """Un avertissement affiché une seule fois est un avertissement qu'on oublie."""
+    indexer(index, "cours.pdf")
+
+    build_kb.ensure_decoupage(index)
+    build_kb.ensure_decoupage(index)
+
+    assert capsys.readouterr().out.count("ne confirme pas son découpage") == 2
+
+
+def test_l_avertissement_nomme_la_recette_et_l_issue(index, capsys):
+    indexer(index, "cours.pdf")
+
+    build_kb.ensure_decoupage(index)
+
+    sortie = capsys.readouterr().out
+    assert f"chunk_size={config.CHUNK_SIZE}" in sortie
+    assert f"pipeline_version={build_kb.PIPELINE_VERSION}" in sortie
+    assert "--force" in sortie
+
+
+def test_force_inscrit_la_recette(index, capsys):
+    """`--force` reconstruit tout l'index : c'est le seul moment où la recette
+    du code est VRAIE, donc le seul où on peut l'inscrire."""
+    indexer(index, "cours.pdf")
+
+    build_kb.ensure_decoupage(index, force=True)
+
+    assert index.metadata["chunk_size"] == config.CHUNK_SIZE
+    assert index.metadata["pipeline_version"] == build_kb.PIPELINE_VERSION
+
+    capsys.readouterr()
+    build_kb.ensure_decoupage(index)
+    assert capsys.readouterr().out == ""
+
+
+def test_le_passage_transmet_force_au_controle_du_decoupage(
+    index, tmp_path, monkeypatch
+):
+    """`main()` doit transmettre --force : sans cela, aucun passage ne pourrait
+    jamais inscrire la recette, et l'avertissement serait éternel."""
+    chemin = ecrire_epub(tmp_path / "livre.epub", [("P1", "الصفحة: 1", "نص")])
+    with Session(build_kb.engine) as session:
+        build_kb.ingerer_un_document(session, index, chemin, args())
+
+    preparer_passage(monkeypatch, tmp_path, "--force")
+    assert build_kb.main() == 0
+
+    assert index.metadata["chunk_size"] == config.CHUNK_SIZE
+
+
+def test_un_index_deja_marque_ne_redit_rien(index, capsys):
+    build_kb.ensure_decoupage(index)
+    capsys.readouterr()
+
+    build_kb.ensure_decoupage(index)
+
+    assert capsys.readouterr().out == ""
+
+
 # --- Tenue d'un long passage ----------------------------------------------
 
 def preparer_passage(monkeypatch, tmp_path, *options: str) -> None:
@@ -478,6 +597,10 @@ def test_le_passage_annonce_les_documents_au_modele_divergent(
     sinon on cherche la panne là où il n'y en a pas."""
     chemin = ecrire_epub(tmp_path / "livre.epub", [("P1", "الصفحة: 1", "نص")])
     preparer_passage(monkeypatch, tmp_path)
+    # Un premier passage inscrit la recette du découpage dans la collection.
+    # Sans elle, le passage suivant refuserait un index qu'il ne peut pas
+    # vérifier — comportement voulu, mais ce n'est pas ce qu'on teste ici.
+    build_kb.ensure_decoupage(index)
     with Session(build_kb.engine) as session:
         build_kb.ingerer_un_document(session, index, chemin, args())
     signaler_modele_divergent("livre.epub")

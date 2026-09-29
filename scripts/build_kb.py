@@ -50,6 +50,11 @@ PERMANENTES = (epub.EpubError, ingest.IngestError)
 # insister immédiatement ne ferait qu'accumuler les échecs.
 PAUSE_REPRISE_S = 3.0
 
+# Version du DÉCOUPAGE. À incrémenter dès que `chunk_pages` ou `decouper_ligne`
+# change de comportement : sans cela, un index bâti par la version précédente
+# resterait cru à jour (voir `ensure_decoupage`).
+PIPELINE_VERSION = 2
+
 
 def extract_arabic_pdf(pdf_path):
     """Retourne une liste de pages : [(numero_page, texte), ...] (page 1-indexée)."""
@@ -103,11 +108,51 @@ def extraire(chemin: Path) -> tuple[dict, list, str]:
     raise ingest.IngestError(f"Format non pris en charge : « {chemin.name} ».")
 
 
+def decouper_ligne(ligne: str, taille: int) -> list[str]:
+    """Découpe une ligne en morceaux d'au plus `taille` caractères.
+
+    Indispensable parce qu'une ligne peut être arbitrairement longue : « الأوسط »
+    en contient une de **15 870 caractères**. Tant que rien ne la coupe,
+    `CHUNK_SIZE` n'est pas un maximum mais une préférence, et un chunk peut
+    dépasser la fenêtre du modèle d'embedding — qui **tronque alors en
+    silence** : le vecteur ne représente plus que le début du texte, et rien ne
+    le signale.
+
+    La coupe se fait de préférence sur un ESPACE, et seulement à défaut au
+    milieu d'un mot : un texte arabe coupé n'importe où reste lisible, mais
+    autant l'éviter quand c'est possible.
+    """
+    if len(ligne) <= taille:
+        return [ligne]
+
+    morceaux = []
+    reste = ligne
+    while len(reste) > taille:
+        coupe = reste.rfind(" ", 0, taille + 1)
+        if coupe <= 0:
+            # Aucun espace dans la fenêtre : un seul « mot » trop long, il faut
+            # couper dedans. C'est le seul cas où la coupe abîme le texte.
+            coupe = taille
+        morceaux.append(reste[:coupe])
+        reste = reste[coupe:].lstrip()
+
+    if reste:
+        morceaux.append(reste)
+    return morceaux
+
+
 def chunk_pages(pages, chunk_size=None):
     """Découpe chaque page en chunks sans franchir les limites de page.
 
     Retourne une liste de dicts : {text, page, line_start, line_end}
     où line_start/line_end sont les numéros de ligne (1-indexés) dans la page.
+
+    ⚠️ `chunk_size` est un MAXIMUM, pas une préférence. Mesuré sur le corpus
+    réel : « الأوسط » contient 773 chunks dépassant 1 000 caractères, dont un de
+    15 870 — 26 fois la cible. Ces chunks dépassaient la fenêtre de bge-m3
+    (8 192 tokens), qui tronque sans le dire, et faisaient à eux seuls échouer
+    l'écriture en « timed out in add ». Les lignes trop longues sont donc
+    découpées par `decouper_ligne`.
     """
     if chunk_size is None:
         chunk_size = config.CHUNK_SIZE
@@ -115,35 +160,45 @@ def chunk_pages(pages, chunk_size=None):
     chunks = []
 
     for page_number, text in pages:
-        lines = text.split("\n")
+        # Chaque morceau garde le numéro de la ligne D'ORIGINE dont il vient :
+        # découper une ligne ne doit pas DÉCALER la numérotation, sinon la
+        # citation ne désigne plus le bon endroit du livre. Deux morceaux d'une
+        # même ligne partagent donc leur intervalle — ils sont bien tous les
+        # deux à cette ligne-là.
+        morceaux = [
+            (numero, morceau)
+            for numero, ligne in enumerate(text.split("\n"), start=1)
+            for morceau in decouper_ligne(ligne, chunk_size)
+        ]
+
         current_lines = []
         current_len = 0
         start_line = 1  # numéro de la première ligne du chunk en cours
+        end_line = 1
 
-        for offset, line in enumerate(lines):
-            line_no = offset + 1
-
-            # Si ajouter cette ligne dépasse la taille cible, on ferme le chunk.
-            if current_lines and current_len + len(line) >= chunk_size:
+        for numero, morceau in morceaux:
+            # Si ajouter ce morceau dépasse la taille cible, on ferme le chunk.
+            if current_lines and current_len + len(morceau) >= chunk_size:
                 chunks.append({
                     "text": "\n".join(current_lines).strip(),
                     "page": page_number,
                     "line_start": start_line,
-                    "line_end": line_no - 1,
+                    "line_end": end_line,
                 })
                 current_lines = []
                 current_len = 0
-                start_line = line_no
+                start_line = numero
 
-            current_lines.append(line)
-            current_len += len(line) + 1  # +1 pour le saut de ligne
+            current_lines.append(morceau)
+            current_len += len(morceau) + 1  # +1 pour le saut de ligne
+            end_line = numero
 
         if current_lines and "\n".join(current_lines).strip():
             chunks.append({
                 "text": "\n".join(current_lines).strip(),
                 "page": page_number,
                 "line_start": start_line,
-                "line_end": len(lines),
+                "line_end": end_line,
             })
 
     return chunks
@@ -160,6 +215,48 @@ def enrichir(chunks, metadonnees):
     if not metadonnees:
         return chunks
     return [{**chunk, **metadonnees} for chunk in chunks]
+
+
+def ensure_decoupage(collection, force: bool = False) -> None:
+    """Signale si l'index n'a pas forcément été bâti avec le découpage actuel.
+
+    Le registre identifie un document par l'empreinte du CONTENU de son fichier.
+    Changer la façon de découper ne change pas cette empreinte : un passage
+    ordinaire répondrait « inchangé » et garderait des chunks bâtis par un autre
+    découpage. C'est le piège du modèle d'embedding, au même endroit — le
+    registre prouve ce qui a été ingéré, jamais COMMENT.
+
+    La recette (`chunk_size`, `pipeline_version`) est inscrite dans les
+    métadonnées de la COLLECTION : le découpage est une propriété de tout
+    l'index, pas d'un document. Elle n'est inscrite que là où elle est VRAIE —
+    collection vide, ou `--force` qui reconstruit tout.
+
+    ⚠️ Avertir plutôt que refuser, et c'est délibéré. Un refus bloque tout, y
+    compris le travail légitime : il obligerait à reconstruire un index dont les
+    chunks sont parfaitement utilisables. Mesuré : bge-m3 tronque au-delà de
+    8 192 tokens, soit ~20 000 caractères d'arabe — un chunk de 1 961 caractères
+    en est dix fois loin. Un garde-fou sans issue avait déjà rendu `--force`
+    inopérant ; la visibilité vaut mieux qu'un blocage.
+    """
+    recette = {"chunk_size": config.CHUNK_SIZE, "pipeline_version": PIPELINE_VERSION}
+    existante = dict(collection.metadata or {})
+
+    if all(existante.get(cle) == valeur for cle, valeur in recette.items()):
+        return
+
+    if force or not collection.count():
+        collection.modify(metadata={**existante, **recette})
+        return
+
+    # Index peuplé, recette absente ou différente : inscrire celle du code
+    # ferait taire l'avertissement alors que les chunks, eux, n'ont pas bougé.
+    # Le signal doit durer tant que le doute dure.
+    indentifie = ", ".join(f"{cle}={valeur}" for cle, valeur in recette.items())
+    print(
+        f"⚠️  L'index ne confirme pas son découpage ({indentifie}).\n"
+        "   Ses chunks n'ont jamais été comparés à celui du code : ils peuvent\n"
+        "   provenir d'une autre version. `--force` les reconstruirait."
+    )
 
 
 def check_ollama():
@@ -346,6 +443,7 @@ def afficher_etat(chemins, args) -> int:
 
     ecart = False
     divergence = False
+    absent = False
     with Session(engine) as session:
         for chemin in chemins:
             ligne = ingest.registre_pour(session, chemin.name)
@@ -353,7 +451,13 @@ def afficher_etat(chemins, args) -> int:
             reel = ingest.compter_chunks(collection, chemin.name)
             modele = ligne.embedding_model if ligne else "—"
             marque = ""
-            if attendu != reel:
+            if ligne is None and reel == 0:
+                # Présent dans le corpus, absent des DEUX côtés : il n'est pas
+                # ingéré. Sans ce signal, deux zéros se ressemblent et l'état
+                # paraît sain alors qu'un ouvrage manque ENTIÈREMENT.
+                absent = True
+                marque = "  ⚠️ non ingéré"
+            elif attendu != reel:
                 ecart = True
                 marque = "  ⚠️ écart"
             if ligne is not None and ligne.embedding_model != modele_index:
@@ -390,7 +494,11 @@ def afficher_etat(chemins, args) -> int:
         print("   documents ont été inscrits sous un autre modèle. On ne peut donc pas")
         print("   prouver que leurs vecteurs viennent du modèle courant.")
         print("   Le prochain passage les ré-embarquera de lui-même : rien à faire à la main.")
-    if not ecart and not orphelins and not divergence:
+    if absent:
+        print("⚠️  « non ingéré » : présent dans le corpus, absent de l'index ET du")
+        print("   registre. Un passage l'ingérera — mais d'ici là, cet ouvrage est")
+        print("   TOTALEMENT absent des réponses, sans autre signe.")
+    if not ecart and not orphelins and not divergence and not absent:
         print("✅ Registre, index et corpus concordent.")
     return 0
 
@@ -401,17 +509,35 @@ def oublier_un_document(nom: str) -> int:
     Ollama n'est pas requis et n'est donc pas vérifié : supprimer des chunks
     n'embarque rien. Cette opération reste ainsi possible serveur d'embeddings
     éteint — l'exact inverse de l'ingestion, qui ne peut rien faire sans lui.
+
+    ⚠️ Un document peut avoir des chunks dans l'index SANS ligne au registre :
+    c'est l'état exact que laisse une ingestion interrompue, qui efface le
+    registre AVANT d'écrire. Refuser dans ce cas serait le raisonnement à
+    l'envers — il y a bel et bien quelque chose à retirer, et rien d'autre ne
+    l'enlèvera : aucun passage d'ingestion ne parcourt un document qui échoue.
     """
     collection = rag.get_collection()
 
     with Session(engine) as session:
-        if ingest.registre_pour(session, nom) is None:
-            print(f"❌ « {nom} » n'est pas au registre : il n'y a rien à retirer.")
+        ligne = ingest.registre_pour(session, nom)
+        restes = ingest.compter_chunks(collection, nom)
+
+        if ligne is None and not restes:
+            print(f"❌ « {nom} » n'est ni au registre ni dans l'index : rien à retirer.")
             print("   `--status` liste ce que le registre connaît.")
             return 1
+
+        # Sans ligne au registre mais avec des chunks : ingestion PARTIELLE.
+        partiel = ligne is None
         supprimes = ingest.purger_document(session, collection, nom)
 
-    print(f"🗑️  {nom} … {supprimes} chunk(s) retiré(s) de l'index, registre effacé")
+    if partiel:
+        print(
+            f"🗑️  {nom} … {supprimes} chunk(s) retiré(s) de l'index "
+            "(ingestion partielle : aucune ligne au registre)"
+        )
+    else:
+        print(f"🗑️  {nom} … {supprimes} chunk(s) retiré(s) de l'index, registre effacé")
 
     # Le fichier est-il encore là ? Si oui, le prochain passage le ré-ingérera,
     # et l'utilisateur croira que le retrait n'a pas fonctionné.
@@ -527,7 +653,8 @@ def main() -> int:
     collection = rag.get_collection()
     try:
         ingest.ensure_embedding_model(collection)
-    except ingest.EmbeddingModelMismatch as erreur:
+        ensure_decoupage(collection, force=args.force)
+    except ingest.IngestError as erreur:
         print(f"❌ {erreur}")
         return 1
 
