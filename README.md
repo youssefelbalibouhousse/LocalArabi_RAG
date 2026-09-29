@@ -16,6 +16,7 @@ app/
 ├── ingest.py        # Ingestion incrémentale et bornée (registre, lots)
 ├── epub.py          # Extraction des EPUB (corpus Shamela)
 ├── evaluation.py    # Mesure de la qualité de la récupération (hit@k, MRR)
+├── fidelite.py      # Contrôle qu'une réponse est ancrée dans le contexte
 ├── language.py      # Détection arabe/français (respect de la langue)
 ├── auth.py          # JWT + hachage des mots de passe
 ├── ratelimit.py     # Limitation de débit (fenêtre glissante)
@@ -29,6 +30,7 @@ scripts/
 ├── build_kb.py              # Ingestion des documents (PDF, EPUB) → base vectorielle
 ├── benchmark_embeddings.py  # Débit de l'endpoint d'embeddings, avant de payer
 ├── eval_rag.py              # Évaluation de la récupération (jeu d'or, mesures)
+├── mesurer_reponses.py      # Mesure des RÉPONSES, avec répétitions
 ├── backup.py                # Sauvegarde + vérification + restauration
 ├── schedule_backup.py       # Sauvegarde quotidienne automatique
 └── create_user.py           # Création d'un compte en ligne de commande
@@ -377,52 +379,78 @@ supprimerait 10 vraies réponses sur 59.
 C'est la population qui compte pour un pilote : la question a l'air normale, et
 c'est précisément là que le système invente le plus.
 
-### Ce que le système fait vraiment, sur 24 questions sans réponse
+### Ce que le système fait vraiment : c'est une DISTRIBUTION, pas un verdict
 
-Passées dans le chemin de production réel (récupération → génération →
-assemblage), puis **lues une par une** :
+⚠️ **La même question reçoit des réponses contradictoires.** Mesuré sur les 9
+questions proches du domaine, deux exécutions chacune
+(`scripts/mesurer_reponses.py --repetitions 2`) :
 
-| | questions éloignées | questions proches du domaine |
+| question | exécution #1 | exécution #2 |
 |---|---|---|
-| refus corrects | **12 / 15** | **4 / 9** |
-| **fabrications** | 3 / 15 | **5 / 9** |
+| ما حكم استخدام مكبر الصوت في الأذان؟ | « لا بأس به. » | « **يحرم** استخدام مكبر الصوت في الأذان. » |
+| هل يفطر الصائم بأخذ حقنة في الوريد؟ | « لا. » | « لا. » |
+| ما حكم التبرع بالأعضاء بعد الوفاة؟ | *refus* | « حكمًا شرعيًا يعتمد على الاختصاصات القانونية في الدولة » |
+| ما حكم صلاة الجمعة عن بعد في زمن الوباء؟ | « ليس على المسافر… » | « الجمعة جائزة خلف كل إمام… » |
+| q075, q076, q077, q078, q083 | *refus* | *refus* |
 
-**Plus la question ressemble au corpus, plus le système invente** — et ses
-inventions sont mieux déguisées. Les cas graves, tous cités correctement :
+**Deux fatwas opposées à une minute d'intervalle, sur la même question** — et aucune
+des deux n'est dans le corpus. Deux réponses contradictoires ne peuvent pas venir
+du même texte : c'est la démonstration la plus directe que quelque chose est
+inventé, et elle ne demande aucun juge.
 
-- « en quelle année est tombé le mur de Berlin ? » → « **1989** » ; « qui a gagné
-  la Coupe du monde 1998 ? » → « **la France** » : des faits exacts, tirés de la
-  mémoire du modèle et non du texte.
-- « هل يفطر الصائم بأخذ حقنة في الوريد؟ » → « **لا شيء عليه.** » — une **fatwa**,
-  appuyée sur un passage qui parle du vomi.
-- « ما حكم العمل في البنوك؟ » → « **لا بأس بأن يعمل في البنوك.** » — une
-  permission que le texte n'énonce nulle part.
-- « ما حكم استخدام مكبر الصوت في الأذان؟ » → « يرى بعض المحققين… » — des **opinions
-  attribuées à des savants que le texte ne nomme pas**.
+⚠️ **Conséquence de méthode** : les comptes publiés plus haut (12 refus sur 15, puis
+4 sur 9) sont **un échantillon chacun**, pas une propriété. Une comparaison
+d'invites faite sur une seule exécution de chaque côté n'est pas interprétable —
+c'est pourquoi `scripts/mesurer_reponses.py` répète chaque question.
 
-> ⚠️ **Un détecteur automatique de refus s'est trompé deux fois, et c'est le
-> résultat le plus utile de cette mesure.** En cherchant la phrase exacte de
-> l'invite, il a compté 5 refus sur 15 là où une lecture en trouve 12, puis 2 sur 9
-> là où il y en a 4 : il manquait les reformulations arabes (« لا توجد الإجابة في
-> السياق المستخرج ») et butait sur une apostrophe française. **Un taux de refus
-> mesuré par correspondance de phrase est faux**, et il l'est dans le sens
-> rassurant. Cette mesure demande un juge, ou une lecture.
+### Trois vérifications déterministes essayées, trois échecs
 
-### Une invite durcie a été essayée, puis retirée
+Toutes visaient le même but : empêcher qu'une réponse soit inventée, sans juge et
+sans rappeler le modèle.
 
-Quatre règles numérotées ont été ajoutées, interdisant explicitement d'inférer, de
-faire des analogies et d'attribuer des opinions absentes. Résultat mesuré sur les
-9 questions proches du domaine : **1 refus sur 9, contre 4 sur 9 avant**. Et la
-forme des réponses a changé — elles sont devenues des fatwas courtes et
-assertives (« لا يجوز بيع الأسهم في البورصة. »), là où l'invite précédente faisait
-au moins citer le corpus.
+**1. Le seuil de distance** — échec, mesuré plus haut : les questions proches du
+domaine ont une distance dans la plage des questions répondables.
 
-**Ajouter des interdictions a rendu le modèle plus assertif, pas plus fidèle.**
-L'invite a été rétablie, et l'expérience est consignée dans `app/rag.py`.
+**2. « La question emploie un mot que le corpus n'a jamais »** — attrape **20/20**
+des questions hors corpus, mais refuse à tort **11 questions répondables sur 57**.
+Les onze sont de la **morphologie** : `بماذا`, `الراجل`, `افترق`, `كرهها`,
+`بنجومه` (bـ + نجوم + ـه), `زواج` là où le corpus écrit `نكاح`, `جواز`, `مخلوقه`.
+Le mot est absent comme *chaîne*, sa racine est partout. Le critère est faux, et
+il l'est systématiquement.
 
-> Réserve honnête : une exécution de chaque côté, et le modèle est stochastique.
-> Le changement de *forme* est net sur 6 questions sur 9, mais un protocole qui
-> tranche devrait mesurer **plusieurs exécutions par question**.
+**3. Le contrôle de fidélité après génération** (`app/fidelite.py`, module pur) —
+cherche dans le contexte les éléments de la réponse. Appliqué aux 7 réponses
+réelles qui ne sont pas des refus : **0 attrapée par les nombres**, 3 par les mots,
+et **3 inchécables** parce qu'elles font un à trois mots (« لا. », « لا بأس به. »).
+
+| réponse | nombres absents | mots absents du contexte |
+|---|---|---|
+| « لا. » | — | aucun (rien à vérifier) |
+| « لا بأس به. » | — | aucun (rien à vérifier) |
+| « الجمعة جائزة خلف كل إمام… » | — | aucun |
+| « حكمًا شرعيًا يعتمد على الاختصاصات القانونية » | — | 14 |
+
+**La raison de ces trois échecs est la même** : les inventions du modèle sont faites
+du **vocabulaire du corpus**. Il en connaît la langue, le style et les tournures.
+Ce qui distingue une citation d'une invention n'est pas lexical, c'est **sémantique**
+— et aucune vérification de mots ne peut le voir.
+
+### La piste qui reste : rendre la réponse vérifiable par construction
+
+Puisqu'aucun contrôle *a posteriori* ne fonctionne sur du texte libre, il reste à
+changer ce qu'on demande au modèle : **une citation verbatim du contexte à l'appui
+de chaque affirmation**. Le contrôle devient alors exact — la citation est dans le
+contexte, ou elle n'y est pas — et le modèle ne peut pas tricher : inventer une
+citation la fait échouer au contrôle, et ne pas en fournir le force au refus.
+
+C'est le seul mécanisme où la vérification n'a pas besoin de comprendre le sens.
+Il reste à le tester avec `scripts/mesurer_reponses.py --repetitions`, et à
+mesurer son coût : un modèle qui ne se conforme pas produirait des refus à tort.
+
+> Le projet le disait depuis le début, pour la qualité des réponses : « mesurer si
+> la réponse est bonne demande un juge ». Les trois échecs ci-dessus ne font que
+> le confirmer sur ce corpus — et ajoutent une raison de plus de rendre la réponse
+> **vérifiable** plutôt que de chercher à la juger automatiquement.
 
 ### Ce qui a été corrigé : plus de citation sous un refus
 
@@ -435,8 +463,16 @@ rapport sous un refus ».
 `rag.est_un_refus()` reconnaît les formules de refus **réellement observées** et
 supprime alors la citation — de la réponse comme du champ `sources` de l'API.
 
-⚠️ Ce garde-fou **n'empêche pas d'inventer** : il enlève une citation trompeuse. La
-fidélité de la génération reste un problème ouvert, mesuré ci-dessus.
+⚠️ Ce garde-fou **n'empêche pas d'inventer** : il enlève une citation trompeuse.
+
+### Une invite durcie a été essayée, puis retirée
+
+Quatre règles numérotées ont été ajoutées, interdisant explicitement d'inférer, de
+faire des analogies et d'attribuer des opinions absentes. Elle donnait 1 refus sur
+9 là où l'invite précédente en donnait 4 — mais **ces deux mesures étaient des
+échantillons uniques** d'un processus très variable (voir les fatwas opposées
+ci-dessus). L'expérience est donc consignée dans `app/rag.py` **sans conclusion
+tranchée** : elle devra être refaite avec des répétitions.
 
 ## Recherche hybride (lexicale + vectorielle)
 
