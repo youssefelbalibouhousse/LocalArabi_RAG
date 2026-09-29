@@ -141,6 +141,86 @@ if EMBEDDING_TIMEOUT < 1:
 # ne sont pas calibrées). Exemple d'activation : DISTANCE_THRESHOLD=1.0
 DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "-1"))
 
+# --- Recherche hybride (lexicale + vectorielle) ---------------------------
+#
+# POURQUOI elle existe, mesuré le 29/09 sur les 59 questions du jeu d'or :
+#
+#   | recherche            | hit@10 | MRR@10 |
+#   |----------------------|--------|--------|
+#   | vectorielle seule    | 76,3 % | 0,52   |
+#   | lexicale seule       | 72,9 % | 0,55   |
+#   | fusion (les deux)    | 96,6 % | 0,67   |
+#
+# La cause est identifiable question par question. Dans `تفسير ابن المنذر`,
+# 85 % des chunks sont des chaînes de transmetteurs (« حدّثنا… عن… ») : un chunk
+# qui contient le verset cherché PLUS deux cents mots de formule ressemble, vu
+# du vecteur, à n'importe quel autre chunk de transmission. Quatre questions
+# citaient un verset mot pour mot ; l'index contenait ce verset, à la page
+# attendue, et la recherche vectorielle ne l'a JAMAIS renvoyé — la recherche
+# lexicale le trouve au rang 1.
+#
+# Les deux recherches échouent différemment, et c'est ce qui justifie de les
+# FUSIONNER plutôt que d'en choisir une : BM25 ne comprend pas les paraphrases,
+# le vecteur noie les termes rares.
+HYBRID_ENABLED = _env_flag("HYBRID_ENABLED", True)
+
+# Candidats demandés à chaque recherche avant fusion. La fusion ne peut pas
+# classer ce qu'on ne lui a pas donné : borner à `N_RESULTS` (5) reviendrait à
+# ne fusionner que les 5 premiers de chaque liste, et à perdre le passage que
+# l'un des deux trouve au rang 40.
+HYBRID_CANDIDATES = int(os.getenv("HYBRID_CANDIDATES", "50"))
+
+# Constante d'aplatissement de la fusion RRF, et poids relatifs.
+#
+# ⚠️ CES TROIS VALEURS NE SONT PAS INDÉPENDANTES DE `HYBRID_CANDIDATES`, et
+# l'ignorer a produit une erreur de conception réelle. Avec une constante de 60
+# et un poids de 3 pour le vecteur, le rang 1 LEXICAL ne vaut que 1/(60+1) =
+# 0,0164, quand le 50e candidat VECTORIEL vaut déjà 3/(60+50) = 0,0273 : la
+# recherche lexicale ne pouvait alors que RECLASSER ce que le vecteur avait déjà
+# vu, jamais introduire un chunk que le vecteur avait manqué. Quatre questions
+# dont la page attendue était classée 1re sur 3 355 par BM25 restaient
+# introuvables. Le gain de la fusion était réel, mais son explication fausse.
+#
+# Grille mesurée à poids égaux (59 questions, 3 355 chunks) :
+#
+#   constante   hit@5   hit@10   MRR
+#        5      88,1 %   94,9 %  0,669
+#       10      88,1 %   96,6 %  0,670   <- retenu (10 à 20 donnent le même hit@10)
+#       20      84,7 %   96,6 %  0,650
+#       60      83,1 %   93,2 %  0,631
+#
+# `hit@5` est ce que le MODÈLE voit (N_RESULTS=5) ; il plafonne tant que la
+# constante reste <= 10. La constante 10 est le seul point qui satisfasse les
+# deux métriques — et le résultat ne dépend pas de la troncature (50, 100 et 200
+# candidats donnent la même chose), ce qui est la meilleure garantie contre un
+# réglage qui ne vaudrait que pour ces 59 questions.
+#
+# ⚠️ Poids ÉGAUX (1:1) et non pondérés. Toutes les configurations pondérées
+# mesurées sont erratiques (76,3 % à 94,9 % selon la constante, sans régularité),
+# là où toutes les configurations à poids égaux se tiennent entre 89,8 % et
+# 96,6 %. La mise en forme standard de RRF est symétrique : introduire un poids
+# revient à décider à l'avance quelle recherche a raison, et la mesure ne le
+# confirme pas.
+HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "10"))
+HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "1.0"))
+HYBRID_LEXICAL_WEIGHT = float(os.getenv("HYBRID_LEXICAL_WEIGHT", "1.0"))
+
+if HYBRID_CANDIDATES < 1:
+    raise ValueError(
+        f"HYBRID_CANDIDATES={HYBRID_CANDIDATES} est invalide : la valeur doit être >= 1."
+    )
+
+if HYBRID_RRF_K < 1:
+    raise ValueError(
+        f"HYBRID_RRF_K={HYBRID_RRF_K} est invalide : la valeur doit être >= 1."
+    )
+
+if HYBRID_VECTOR_WEIGHT <= 0 or HYBRID_LEXICAL_WEIGHT <= 0:
+    raise ValueError(
+        "Les poids de la recherche hybride doivent être strictement positifs "
+        f"(reçu : {HYBRID_VECTOR_WEIGHT} et {HYBRID_LEXICAL_WEIGHT})."
+    )
+
 # CORS : origines autorisées par le navigateur.
 # "*" en développement ; en production, mettre l'URL du front
 # (ex. CORS_ALLOW_ORIGINS="https://mon-site.com,https://www.mon-site.com").

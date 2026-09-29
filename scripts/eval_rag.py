@@ -175,9 +175,26 @@ def mise_en_contexte(collection, k: int, questions: list, empreinte, sources: se
 
     L'empreinte et les sources sont fournies par l'appelant : elles viennent du
     même parcours de la collection, qu'on ne refait donc pas ici.
+
+    La recherche est décrite EN ENTIER, poids compris. Un rapport qui ne dit pas
+    « fusion » mesure peut-être la fusion sans le savoir : deux mesures
+    inconciliables porteraient alors le même nom, et on attribuerait au réglage
+    suivant l'effet du précédent. C'est la même raison qui fait inscrire le modèle
+    d'embedding dans les métadonnées de la collection.
     """
+    pipeline = "vectoriel seul"
+    hybride = {}
+    if config.HYBRID_ENABLED:
+        pipeline = "fusion lexicale + vectorielle (RRF)"
+        hybride = {
+            "hybride_candidats": config.HYBRID_CANDIDATES,
+            "hybride_rrf_k": config.HYBRID_RRF_K,
+            "hybride_poids_vecteur": config.HYBRID_VECTOR_WEIGHT,
+            "hybride_poids_lexical": config.HYBRID_LEXICAL_WEIGHT,
+        }
+
     return {
-        "pipeline": "vectoriel seul",
+        "pipeline": pipeline,
         "modele_embedding": config.EMBEDDING_MODEL,
         "chunk_size": config.CHUNK_SIZE,
         "n_results_app": config.N_RESULTS,
@@ -189,6 +206,7 @@ def mise_en_contexte(collection, k: int, questions: list, empreinte, sources: se
         "questions_draft": sum(
             1 for question in questions if question.status == evaluation.STATUS_DRAFT
         ),
+        **hybride,
     }
 
 
