@@ -23,6 +23,25 @@
 #   # écrivez une question par extrait ci-dessous, puis :
 #   python scripts/eval_rag.py --run --label baseline
 #
+# --- Ce que « validated » veut dire ici (29/09) -----------------------------
+#
+# Les 59 questions sont passées en « validated » après ce contrôle, ni plus ni
+# moins :
+#
+#   1. chaque page attendue EXISTE dans l'index (vérifié sur les 59, 0 absente) ;
+#   2. chaque page a été OUVERTE, et le passage qui répond a été reproduit dans
+#      la note, avec ses numéros de lignes. Relire une question, c'est confronter
+#      la question au passage cité — pas relire le livre ;
+#   3. les pages sans vocabulaire commun avec leur question ont été examinées une
+#      par une. Trois cas, tous légitimes : deux questions posées en FRANÇAIS
+#      (la comparaison de mots ne porte que sur l'arabe), et une différence de
+#      flexion en arabe (« الثلاث » contre « ثلاثا »).
+#
+# Ce qui n'a PAS été fait : aucune lecture intégrale des 4 000 pages du corpus,
+# et aucune relecture par une seconde personne. Ce contrôle établit qu'un humain
+# a confirmé la réponse attendue de chaque question ; il n'établit pas que le jeu
+# d'or couvre le corpus, ni qu'il est exempt de biais de rédaction.
+#
 # --- 37 questions sur 12445.epub : 36 en arabe, 1 en français ---------------
 #
 # La question q037 est posée en FRANÇAIS à dessein. bge-m3 est multilingue : une
@@ -69,62 +88,62 @@
 # La promotion en « validated » reste néanmoins une LECTURE humaine : une
 # recherche prouve qu'une page contient le passage, pas qu'il répond à la
 # question.
-{"id": "q001", "question": "بماذا كان يُكنى ابن المنذر؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 7}], "notes": "ويكنى أبا بكر بن المنذر ومشهور بابن المنذر (ص 7). La kunya n'est écrite qu'ici : vérifié par recherche sur les 144 pages."}
-{"id": "q002", "question": "على أي كتب اعتمد المحقق في توثيق نصوص كتاب الإجماع؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 28}], "notes": "كتاب الإقناع، والجزء الثاني من كتاب الإشراف، وأجزاء متفرقة من الأوسط في السنن، والإجماع والاختلاف."}
-{"id": "q003", "question": "ما الأحداث التي تنقض الطهارة وتوجب الوضوء بإجماع أهل العلم؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 33}], "notes": "خروج الغائط من الدبر، وخروج البول من الذكر، وخروج المني، وخروج الريح، وزوال العقل."}
-{"id": "q004", "question": "هل يجوز التيمم بالتراب ذي الغبار؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 36}], "notes": "18 - وأجمعوا على أن التيمم بالتراب الغبار جائز."}
-{"id": "q005", "question": "ما حكم من تكلم في صلاته عامدًا لا يريد إصلاح شيء من أمرها؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 39}], "notes": "46 - وجمعوا على أن من تكلم في صلاته عامدا... أن صلاته فاسدة."}
-{"id": "q006", "question": "كيف يصلي من لا يطيق القيام؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 42}], "notes": "65 - وأجمعوا على أن فرض من لا يطيق القيام أن يصلي جالسا."}
-{"id": "q007", "question": "كم تجب في الإبل من الشاة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 45}], "notes": "88 - وأجمعوا على أن في خمس من الإبل شاة."}
-{"id": "q008", "question": "هل يجوز دفع زكاة المال إلى أهل الذمة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 48}], "notes": "118 - وأجمعوا على أن الذمي لا يعطى من زكاة الأموال شيئا."}
-{"id": "q009", "question": "كم حجة تجب على المرء في عمره؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 51}], "notes": "136 - وأجمعوا أن على المرء في عمره حجة واحدة: حجة الإسلام إلا أن ينذر نذرا."}
-{"id": "q010", "question": "هل يجوز للمحرم صيد البحر وأكله وبيعه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 54}], "notes": "159 - وأجمعوا على أن صيد البحر للمحرم مباح اصطياده، وأكله، وبيعه، وشرؤاه."}
-{"id": "q011", "question": "ما حكم من فاته الوقوف بعرفة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 57}], "notes": "187 - وأجمعوا على أن الوقوف بعرفة فرض، ولا حج لمن فاته الوقوف بها."}
-{"id": "q012", "question": "هل تجزئ حجة الرجل عن المرأة، وحجة المرأة عن الرجل؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 60}], "notes": "210 - وأجمعوا على أن الحج الرجل عن المرأة، والمرأة عن الرجل: يجزئ."}
-{"id": "q013", "question": "كم سهم الفرس وكم سهم الراجل من الغنيمة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 63}], "notes": "238 - وأجمعوا على أن للفرس سهمين، وللراجل سهما."}
-{"id": "q014", "question": "هل يجب استحلاف المدعى عليه في الأموال؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 66}], "notes": "257 - وأجمعوا على وجوب استحلاف المدعى عليه في الأموال."}
-{"id": "q015", "question": "كيف يقسم مال الميت بين أولاده إذا لم يكن معهم أحد من أهل الفرائض؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 69}], "notes": "277 - وجعل الفاضل من المال بين الولد: للذكر مثل حظ الأُنثيين."}
-{"id": "q016", "question": "هل يرث الإخوة مع الابن أو ابن الابن وإن سفل، أو مع الأب؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 72}], "notes": "298 - لا يرثون مع الابن، ولا ابن الابن وإن سفل، ولا مع الأب."}
-{"id": "q017", "question": "كيف يرث الخنثى؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 75}], "notes": "327 - وأجمعوا على أن الخنثى يرث من حيث يبول."}
-{"id": "q018", "question": "هل للموصي أن يرجع في وصيته؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 78}], "notes": "347 - وأجمعوا على أن الرجل أن يرجع في كل ما يوصي به إلا العتق."}
-{"id": "q019", "question": "هل تنكح المرأة على عمتها أو على خالتها؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 81}], "notes": "370 - وأجمعوا على أن لا تنكح المرأة على عمتها. ولا على خالتها."}
-{"id": "q020", "question": "من أحق بالولد الصغير إذا افترق الزوجان؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 84}], "notes": "393 - وأجمعوا أن الزوجين إذا افترقا ولهما ولد أن الأم أحق به ما لم تنكح."}
-{"id": "q021", "question": "ما حكم النصرانيين الزوجين إذا أسلم الزوج قبل المرأة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 87}], "notes": "418 - أنهما على نكاحهما كانت مدخولًا بها، أو لم يكن."}
-{"id": "q022", "question": "كم عدة الحرة المسلمة التي ليست بحامل من وفاة زوجها؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 90}], "notes": "441 - أربعة أشهر وعشرا، مدخولا بها وغير مدخول، صغيرة لم تبلغ أو كبيرة."}
-{"id": "q023", "question": "هل تمنع المرأة في الإحداد من الطيب والزينة؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 93}], "notes": "460 - وأجمعوا على منع المرأة في الإحداد: من الطيب والزينة."}
-{"id": "q024", "question": "هل يجوز بيع الدين بالدين؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 96}], "notes": "482 - وأجمعوا على أن بيع الدين بالدين لا يجوز."}
-{"id": "q025", "question": "ما حكم من باع سلعة بثمن مجهول غير معلوم ولا مسمى؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 99}], "notes": "504 - أن البيع فاسد."}
-{"id": "q026", "question": "هل يجوز للمسلم أن يرتهن المصحف من أخيه المسلم؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 102}], "notes": "526 - وأجمعوا على أن المسلم أن يرتهن المصحف من أخيه المسلم."}
-{"id": "q027", "question": "ما حكم اكتراء الأرض بالذهب والفضة لوقت معلوم؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 105}], "notes": "541 - وأجمعوا على أن اكتراء الأرض بالذهب والفضة، وقتا معلوما جائز."}
-{"id": "q028", "question": "هل يضمن المودَع الوديعة إذا أحرزها في صندوقه ثم تلفت؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 108}], "notes": "561 - ألا ضمان عليه."}
-{"id": "q029", "question": "هل تنفسخ الكتابة إذا وفّق السيد عن مطالبة المكاتب بنجومه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 111}], "notes": "585 - أن الكتابة لا تنفسخ ما داما ثابتين على العقد الأول."}
-{"id": "q030", "question": "ما حكم هبة المسلم للذمي وهبة الذمي للمسلم إذا قبض الموهوب؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 114}], "notes": "603 - أن ذلك جائز."}
-{"id": "q031", "question": "هل على العبد قطع إذا سرق من مولاه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 117}], "notes": "623 - وأجمعوا على أن لا قطع على العبد إذا سرق من مولاه."}
-{"id": "q032", "question": "هل تجوز الكفالة في الحدود؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 120}], "notes": "649 - وأجمعوا على أنه لا يجوز الكفالة في الحدود."}
-{"id": "q033", "question": "كم يجب في المأمومة من الدية؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 123}], "notes": "676 - وأجمعوا على أن في المأمومة ثلث الدية."}
-{"id": "q034", "question": "هل تحمل العاقلة دية القتل العمد؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 126}], "notes": "705 - وأجمعوا على أن العاقلة لا تحمل دية العمد، وأنها تحمل دية الخطأ."}
-{"id": "q035", "question": "ماذا يحدث إذا ملك الرجل أبويه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 129}], "notes": "727 - وأجمعوا أن الرجل إذا ملك أبويه... أنهم يعتقون عليه ساعة تملكهم."}
-{"id": "q036", "question": "متى تجب قسمة الأرض بين الشركاء؟", "lang": "ar", "status": "draft", "expected": [{"source": "12445.epub", "page": 132}], "notes": "750 - الأرض إذا كانت بين شركاء، واحتملت القسمة عن غير ضرر يلحق أحدا منهم: قسمت."}
-{"id": "q037", "question": "Peut-on épouser la tante de son épouse ?", "lang": "fr", "status": "draft", "expected": [{"source": "12445.epub", "page": 81}], "notes": "Issue 370 (ص 81) : « وأجمعوا على أن لا تنكح المرأة على عمتها. ولا على خالتها ». Choix mesuré : parmi 8 questions françaises testées, c'est la seule classée rang 1 (les 7 autres : rangs 2 à 6, toutes dans le top-10)."}
-{"id": "q038", "question": "هل يجوز للمحرم لبس السراويل إذا لم يجد الإزار؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 214}], "notes": ""}
-{"id": "q039", "question": "ما ثواب العمرة في شهر رمضان؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 233}], "notes": ""}
-{"id": "q040", "question": "Les frères et sœurs héritent-ils lorsque le père est encore en vie ?", "lang": "fr", "status": "draft", "expected": [{"source": "12843.epub", "page": 282}], "notes": ""}
-{"id": "q041", "question": "ما حكم زواج المرأة من عبدها؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 310}], "notes": ""}
-{"id": "q042", "question": "إذا أسلمت الزوجة قبل زوجها فما حكم النكاح؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 316}], "notes": ""}
-{"id": "q043", "question": "هل يُقتل المسلم بالكافر؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 350}], "notes": ""}
-{"id": "q044", "question": "تحت أي شجرة بايع الصحابة رسول الله صلى الله عليه وسلم؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 457}], "notes": ""}
-{"id": "q045", "question": "كيف قضى رسول الله صلى الله عليه وسلم في بعير اختصم فيه رجلان؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 523}], "notes": ""}
-{"id": "q046", "question": "ما الثلاث التي كرهها الله لعباده؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 561}], "notes": ""}
-{"id": "q047", "question": "هل يصح بيع المفلس بعد الحجر عليه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 563}], "notes": ""}
-{"id": "q048", "question": "ما حكم استقراض الحنطة والشعير والتمر؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 578}], "notes": ""}
-{"id": "q049", "question": "ما حكم حلب ماشية الغير بغير إذنه؟", "lang": "ar", "status": "draft", "expected": [{"source": "12843.epub", "page": 632}], "notes": ""}
-{"id": "q050", "question": "ما الدليل الذي استشهد به ابن عباس على جواز السلم؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 66}], "notes": ""}
-{"id": "q051", "question": "كيف فسّر قتادة قوله تعالى: {يوم تجد كل نفس ما عملت من خير محضرا}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 168}], "notes": ""}
-{"id": "q052", "question": "فيمن نزلت آية: {كيف يهدي الله قوما كفروا بعد إيمانهم}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 278}], "notes": ""}
-{"id": "q053", "question": "كم كانت الكعبة مخلوقة قبل الأرض؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 294}], "notes": ""}
-{"id": "q054", "question": "ما معنى {مسوّمين} في قوله تعالى: {بخمسة آلاف من الملائكة مسوّمين}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 369}], "notes": ""}
-{"id": "q055", "question": "ما معنى {ثم صرفكم عنهم ليبتليكم}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 446}], "notes": ""}
-{"id": "q056", "question": "ما معنى {لأكفرن عنهم سيئاتهم}؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 539}], "notes": ""}
-{"id": "q057", "question": "ما حد الزانية الثيب إذا فجرت؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 601}], "notes": ""}
-{"id": "q058", "question": "كم حد الأمة إذا أتت بفاحشة؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 654}], "notes": ""}
-{"id": "q059", "question": "ما معنى {ولا تقتلوا أنفسكم} عند مجاهد؟", "lang": "ar", "status": "draft", "expected": [{"source": "22549.epub", "page": 662}], "notes": ""}
+{"id": "q001", "question": "بماذا كان يُكنى ابن المنذر؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 7}], "notes": "ويكنى أبا بكر بن المنذر ومشهور بابن المنذر (ص 7). La kunya n'est écrite qu'ici : vérifié par recherche sur les 144 pages."}
+{"id": "q002", "question": "على أي كتب اعتمد المحقق في توثيق نصوص كتاب الإجماع؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 28}], "notes": "كتاب الإقناع، والجزء الثاني من كتاب الإشراف، وأجزاء متفرقة من الأوسط في السنن، والإجماع والاختلاف."}
+{"id": "q003", "question": "ما الأحداث التي تنقض الطهارة وتوجب الوضوء بإجماع أهل العلم؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 33}], "notes": "خروج الغائط من الدبر، وخروج البول من الذكر، وخروج المني، وخروج الريح، وزوال العقل."}
+{"id": "q004", "question": "هل يجوز التيمم بالتراب ذي الغبار؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 36}], "notes": "18 - وأجمعوا على أن التيمم بالتراب الغبار جائز."}
+{"id": "q005", "question": "ما حكم من تكلم في صلاته عامدًا لا يريد إصلاح شيء من أمرها؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 39}], "notes": "46 - وجمعوا على أن من تكلم في صلاته عامدا... أن صلاته فاسدة."}
+{"id": "q006", "question": "كيف يصلي من لا يطيق القيام؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 42}], "notes": "65 - وأجمعوا على أن فرض من لا يطيق القيام أن يصلي جالسا."}
+{"id": "q007", "question": "كم تجب في الإبل من الشاة؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 45}], "notes": "88 - وأجمعوا على أن في خمس من الإبل شاة."}
+{"id": "q008", "question": "هل يجوز دفع زكاة المال إلى أهل الذمة؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 48}], "notes": "118 - وأجمعوا على أن الذمي لا يعطى من زكاة الأموال شيئا."}
+{"id": "q009", "question": "كم حجة تجب على المرء في عمره؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 51}], "notes": "136 - وأجمعوا أن على المرء في عمره حجة واحدة: حجة الإسلام إلا أن ينذر نذرا."}
+{"id": "q010", "question": "هل يجوز للمحرم صيد البحر وأكله وبيعه؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 54}], "notes": "159 - وأجمعوا على أن صيد البحر للمحرم مباح اصطياده، وأكله، وبيعه، وشرؤاه."}
+{"id": "q011", "question": "ما حكم من فاته الوقوف بعرفة؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 57}], "notes": "187 - وأجمعوا على أن الوقوف بعرفة فرض، ولا حج لمن فاته الوقوف بها."}
+{"id": "q012", "question": "هل تجزئ حجة الرجل عن المرأة، وحجة المرأة عن الرجل؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 60}], "notes": "210 - وأجمعوا على أن الحج الرجل عن المرأة، والمرأة عن الرجل: يجزئ."}
+{"id": "q013", "question": "كم سهم الفرس وكم سهم الراجل من الغنيمة؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 63}], "notes": "238 - وأجمعوا على أن للفرس سهمين، وللراجل سهما."}
+{"id": "q014", "question": "هل يجب استحلاف المدعى عليه في الأموال؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 66}], "notes": "257 - وأجمعوا على وجوب استحلاف المدعى عليه في الأموال."}
+{"id": "q015", "question": "كيف يقسم مال الميت بين أولاده إذا لم يكن معهم أحد من أهل الفرائض؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 69}], "notes": "277 - وجعل الفاضل من المال بين الولد: للذكر مثل حظ الأُنثيين."}
+{"id": "q016", "question": "هل يرث الإخوة مع الابن أو ابن الابن وإن سفل، أو مع الأب؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 72}], "notes": "298 - لا يرثون مع الابن، ولا ابن الابن وإن سفل، ولا مع الأب."}
+{"id": "q017", "question": "كيف يرث الخنثى؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 75}], "notes": "327 - وأجمعوا على أن الخنثى يرث من حيث يبول."}
+{"id": "q018", "question": "هل للموصي أن يرجع في وصيته؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 78}], "notes": "347 - وأجمعوا على أن الرجل أن يرجع في كل ما يوصي به إلا العتق."}
+{"id": "q019", "question": "هل تنكح المرأة على عمتها أو على خالتها؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 81}], "notes": "370 - وأجمعوا على أن لا تنكح المرأة على عمتها. ولا على خالتها."}
+{"id": "q020", "question": "من أحق بالولد الصغير إذا افترق الزوجان؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 84}], "notes": "393 - وأجمعوا أن الزوجين إذا افترقا ولهما ولد أن الأم أحق به ما لم تنكح."}
+{"id": "q021", "question": "ما حكم النصرانيين الزوجين إذا أسلم الزوج قبل المرأة؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 87}], "notes": "418 - أنهما على نكاحهما كانت مدخولًا بها، أو لم يكن."}
+{"id": "q022", "question": "كم عدة الحرة المسلمة التي ليست بحامل من وفاة زوجها؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 90}], "notes": "441 - أربعة أشهر وعشرا، مدخولا بها وغير مدخول، صغيرة لم تبلغ أو كبيرة."}
+{"id": "q023", "question": "هل تمنع المرأة في الإحداد من الطيب والزينة؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 93}], "notes": "460 - وأجمعوا على منع المرأة في الإحداد: من الطيب والزينة."}
+{"id": "q024", "question": "هل يجوز بيع الدين بالدين؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 96}], "notes": "482 - وأجمعوا على أن بيع الدين بالدين لا يجوز."}
+{"id": "q025", "question": "ما حكم من باع سلعة بثمن مجهول غير معلوم ولا مسمى؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 99}], "notes": "504 - أن البيع فاسد."}
+{"id": "q026", "question": "هل يجوز للمسلم أن يرتهن المصحف من أخيه المسلم؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 102}], "notes": "526 - وأجمعوا على أن المسلم أن يرتهن المصحف من أخيه المسلم."}
+{"id": "q027", "question": "ما حكم اكتراء الأرض بالذهب والفضة لوقت معلوم؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 105}], "notes": "541 - وأجمعوا على أن اكتراء الأرض بالذهب والفضة، وقتا معلوما جائز."}
+{"id": "q028", "question": "هل يضمن المودَع الوديعة إذا أحرزها في صندوقه ثم تلفت؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 108}], "notes": "561 - ألا ضمان عليه."}
+{"id": "q029", "question": "هل تنفسخ الكتابة إذا وفّق السيد عن مطالبة المكاتب بنجومه؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 111}], "notes": "585 - أن الكتابة لا تنفسخ ما داما ثابتين على العقد الأول."}
+{"id": "q030", "question": "ما حكم هبة المسلم للذمي وهبة الذمي للمسلم إذا قبض الموهوب؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 114}], "notes": "603 - أن ذلك جائز."}
+{"id": "q031", "question": "هل على العبد قطع إذا سرق من مولاه؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 117}], "notes": "623 - وأجمعوا على أن لا قطع على العبد إذا سرق من مولاه."}
+{"id": "q032", "question": "هل تجوز الكفالة في الحدود؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 120}], "notes": "649 - وأجمعوا على أنه لا يجوز الكفالة في الحدود."}
+{"id": "q033", "question": "كم يجب في المأمومة من الدية؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 123}], "notes": "676 - وأجمعوا على أن في المأمومة ثلث الدية."}
+{"id": "q034", "question": "هل تحمل العاقلة دية القتل العمد؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 126}], "notes": "705 - وأجمعوا على أن العاقلة لا تحمل دية العمد، وأنها تحمل دية الخطأ."}
+{"id": "q035", "question": "ماذا يحدث إذا ملك الرجل أبويه؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 129}], "notes": "727 - وأجمعوا أن الرجل إذا ملك أبويه... أنهم يعتقون عليه ساعة تملكهم."}
+{"id": "q036", "question": "متى تجب قسمة الأرض بين الشركاء؟", "lang": "ar", "status": "validated", "expected": [{"source": "12445.epub", "page": 132}, {"source": "12843.epub", "page": 695}], "notes": "750 - الأرض إذا كانت بين شركاء، واحتملت القسمة عن غير ضرر يلحق أحدا منهم: قسمت. الإقناع (12843) ص 695 donne la même règle : «وأجمع من يحفظ عنه من علماء الأمصار ... على أن الرباع أو الأرض إذا كانت بين شركاء، واحتملت القسم من غير ضرر يلحقهم فيه ... أن القسم في ذلك يجب بينهم إذا ثبتت البينة على أصول أملاكهم». DEUX passages acceptés : la réponse à cette question existe dans les deux ouvrages, et rendre l'un ou l'autre est une récupération correcte."}
+{"id": "q037", "question": "Peut-on épouser la tante de son épouse ?", "lang": "fr", "status": "validated", "expected": [{"source": "12445.epub", "page": 81}], "notes": "Issue 370 (ص 81) : « وأجمعوا على أن لا تنكح المرأة على عمتها. ولا على خالتها ». Choix mesuré : parmi 8 questions françaises testées, c'est la seule classée rang 1 (les 7 autres : rangs 2 à 6, toutes dans le top-10)."}
+{"id": "q038", "question": "هل يجوز للمحرم لبس السراويل إذا لم يجد الإزار؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 214}], "notes": "للمحرم أن يلبس السراويل إذا لم يجد الإزار (الأسطر 3-4)."}
+{"id": "q039", "question": "ما ثواب العمرة في شهر رمضان؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 233}], "notes": "«عمرة في رمضان تعدل حجة» (الأسطر 1-2)."}
+{"id": "q040", "question": "Les frères et sœurs héritent-ils lorsque le père est encore en vie ?", "lang": "fr", "status": "validated", "expected": [{"source": "12843.epub", "page": 282}], "notes": "وأجمع أهل العلم على أن الإخوة لا يرثون مع الابن ولا مع ابن الابن وإن سفل ولا مع الأب (الأسطر 1-3)."}
+{"id": "q041", "question": "ما حكم زواج المرأة من عبدها؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 310}], "notes": "وأجمع أهل العلم على أن تزوج المرأة عبدها باطل (الأسطر 1-4)."}
+{"id": "q042", "question": "إذا أسلمت الزوجة قبل زوجها فما حكم النكاح؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 316}], "notes": "«وإن أسلمت هي قبله انفسخ» (الأسطر 4-7)."}
+{"id": "q043", "question": "هل يُقتل المسلم بالكافر؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 350}], "notes": "«ولا يجوز قتل المؤمن بالكافر» لقوله ﷺ: «لا يقتل مؤمن بكافر» (السطر 5)."}
+{"id": "q044", "question": "تحت أي شجرة بايع الصحابة رسول الله صلى الله عليه وسلم؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 457}], "notes": "«بايعناه وعمر آخذ بيده تحت الشجرة وهي سمرة» (السطر 1)."}
+{"id": "q045", "question": "كيف قضى رسول الله صلى الله عليه وسلم في بعير اختصم فيه رجلان؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 523}], "notes": "«فقضى رسول الله ﷺ في البعير نصفين» (السطر 1)."}
+{"id": "q046", "question": "ما الثلاث التي كرهها الله لعباده؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 561}], "notes": "«إن الله كره لكم ثلاثا: قيل وقال، وإضاعة المال، وكثرة السؤال» (السطر 1)."}
+{"id": "q047", "question": "هل يصح بيع المفلس بعد الحجر عليه؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 563}], "notes": "«وإذا حجر القاضي على المفلس لم يجز بيعه ولا شراؤه ولا هبته ولا عتقه» (الأسطر 3-4)."}
+{"id": "q048", "question": "ما حكم استقراض الحنطة والشعير والتمر؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 578}], "notes": "أجمع كل من يحفظ عنه من أهل العلم على أن استقراض الحنطة والشعير والتمر جائزة (الأسطر 1-2)."}
+{"id": "q049", "question": "ما حكم حلب ماشية الغير بغير إذنه؟", "lang": "ar", "status": "validated", "expected": [{"source": "12843.epub", "page": 632}], "notes": "«ومن كان مستغنيا حرم عليه أن يحتلب ماشية أحد إلا بإذنه» (الأسطر 3-6)."}
+{"id": "q050", "question": "ما الدليل الذي استشهد به ابن عباس على جواز السلم؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 66}], "notes": "ابن عباس: «أشهد أن السلف المضمون إلى أجل أن الله أحله وأذن فيه، ويتلو: {يا أيها الذين آمنوا إذا تداينتم بدين إلى أجل مسمى}» (الأسطر 1-2)."}
+{"id": "q051", "question": "كيف فسّر قتادة قوله تعالى: {يوم تجد كل نفس ما عملت من خير محضرا}؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 168}], "notes": "«عن قتادة: {يوم تجد كل نفس ما عملت من خير محضرا} يقول: موفرا» (الأسطر 1-4)."}
+{"id": "q052", "question": "فيمن نزلت آية: {كيف يهدي الله قوما كفروا بعد إيمانهم}؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 278}], "notes": "«عن مجاهد: نزلت في رجل من بني عمرو بن عوف كفر بعد إيمانه، فجاء الشام» (الأسطر 3-5)."}
+{"id": "q053", "question": "كم كانت الكعبة مخلوقة قبل الأرض؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 294}], "notes": "«إن الكعبة خلقت قبل الأرض بألفي سنة» (السطر 2)."}
+{"id": "q054", "question": "ما معنى {مسوّمين} في قوله تعالى: {بخمسة آلاف من الملائكة مسوّمين}؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 369}], "notes": "«عن مجاهد في {مسومين}: معلمين» (الأسطر 4-5)."}
+{"id": "q055", "question": "ما معنى {ثم صرفكم عنهم ليبتليكم}؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 446}], "notes": "«عن أبي عبيدة: ثم صرفكم عنهم ليبتليكم، أي ليبلوكم: ليختبركم» (الأسطر 1-4)."}
+{"id": "q056", "question": "ما معنى {لأكفرن عنهم سيئاتهم}؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 539}], "notes": "«عن أبي عبيدة: لأكفرن عنهم سيئاتهم أي: لأذهبنا عنهم، أي: لأمحونها عنهم» (الأسطر 3-5)."}
+{"id": "q057", "question": "ما حد الزانية الثيب إذا فجرت؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 601}], "notes": "«فصارت السنة في من أحصن جلد مائة، ثم الرجم بالحجارة» (الأسطر 2-3)."}
+{"id": "q058", "question": "كم حد الأمة إذا أتت بفاحشة؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 654}], "notes": "«فعليهن نصف ما على المحصنات من العذاب: خمسون جلدة ولا نفي ولا رجم» (الأسطر 1-2)."}
+{"id": "q059", "question": "ما معنى {ولا تقتلوا أنفسكم} عند مجاهد؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 662}], "notes": "«عن مجاهد: {ولا تقتلوا أنفسكم} قال: بعضكم بعضا» (الأسطر 1-4)."}
