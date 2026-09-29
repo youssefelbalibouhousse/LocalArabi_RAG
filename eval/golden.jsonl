@@ -9,10 +9,16 @@
 #   lang      "ar" ou "fr" (facultatif, défaut "ar")
 #   status    "draft" (défaut) tant que la question n'a pas été relue ;
 #             "validated" une fois la source attendue confirmée à la main
-#   expected  liste NON VIDE de passages attendus, chacun :
+#   expected  liste de passages attendus, chacun :
 #               source  nom du fichier (obligatoire)
 #               page    numéro de page (facultatif : n'importe quelle page
 #                       du fichier conviendra alors)
+#             Une liste VIDE (« expected: [] ») déclare une question HORS CORPUS :
+#             sa bonne réponse est « il n'y a rien dans les documents ». Elle ne
+#             se mesure pas par un rang — il n'y en a aucun — mais par la distance
+#             du chunk le plus proche, et par le fait que le système refuse.
+#             ⚠️ Une clé ABSENTE reste une erreur : ne pas confondre une question
+#             de refus écrite exprès avec une question mal saisie.
 #   notes     remarque libre (facultatif)
 #
 # ⚠️ Ne comparez que des mesures faites sur le MÊME corpus. Le rapport
@@ -147,3 +153,30 @@
 {"id": "q057", "question": "ما حد الزانية الثيب إذا فجرت؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 601}], "notes": "«فصارت السنة في من أحصن جلد مائة، ثم الرجم بالحجارة» (الأسطر 2-3)."}
 {"id": "q058", "question": "كم حد الأمة إذا أتت بفاحشة؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 654}], "notes": "«فعليهن نصف ما على المحصنات من العذاب: خمسون جلدة ولا نفي ولا رجم» (الأسطر 1-2)."}
 {"id": "q059", "question": "ما معنى {ولا تقتلوا أنفسكم} عند مجاهد؟", "lang": "ar", "status": "validated", "expected": [{"source": "22549.epub", "page": 662}], "notes": "«عن مجاهد: {ولا تقتلوا أنفسكم} قال: بعضكم بعضا» (الأسطر 1-4)."}
+
+# --- 15 questions HORS CORPUS : la bonne réponse est « il n'y a rien » ----
+#
+# `"expected": []` : aucune source ne peut satisfaire la question. Ce qui se
+# mesure n'est pas un rang (il n'y en a pas) mais la DISTANCE du chunk le plus
+# proche, et le fait que le système REFUSE au lieu d'inventer. C'est la
+# question qu'un utilisateur pose le plus souvent sans le savoir.
+#
+# Chaque note dit ce qui a été vérifié, mot par mot, contre l'index — et
+# signale les mots qui y sont présents MALGRÉ TOUT. Deux cas : « برلين »
+# (préface de l'éditeur, pas le mur de Berlin) et « 1998 » (numéro de hadith,
+# pas une année). Un mot trouvé ne prouve pas une réponse trouvée.
+{"id": "q060", "question": "ما هي عاصمة أستراليا؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « عاصمه » et « استراليا » absent de l'index (0 chunk)."}
+{"id": "q061", "question": "في أي سنة سقط جدار برلين؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « جدار » absent (0 chunk). ⚠️ « برلين » apparaît dans 2 chunks, mais seulement dans la PRÉFACE DE L'ÉDITEUR de تفسير ابن المنذر (p. 14 et 28), qui décrit un manuscrit conservé à la bibliothèque de Berlin. Rien sur le mur, rien sur sa chute — vérifié en ouvrant les deux chunks. Le vocabulaire de surface est donc présent : c'est un bon test."}
+{"id": "q062", "question": "ما هو أكبر كوكب في المجموعة الشمسية؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « كوكب », « المجموعه » et « الشمسيه » absent de l'index (0 chunk). « اكبر » existe (19 chunks) mais sans rapport avec l'astronomie."}
+{"id": "q063", "question": "كيف أحضّر طبق الكسكس؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « طبق » et « الكسكس » absent de l'index (0 chunk). La cuisine n'est pas traitée."}
+{"id": "q064", "question": "بماذا تُكتب برامج بايثون؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « برامج » et « بايثون » absent de l'index (0 chunk). L'informatique n'est pas traitée."}
+{"id": "q065", "question": "كيف يعمل محرك الاحتراق الداخلي؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « محرك », « الاحتراق » et « الداخلي » absent de l'index (0 chunk)."}
+{"id": "q066", "question": "ما هو الرمز الكيميائي للذهب؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « الكيميايي » et « للذهب » absent de l'index (0 chunk). La chimie n'est pas traitée."}
+{"id": "q067", "question": "من فاز بكأس العالم لكرة القدم سنة 1998؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « فاز », « بكاس », « لكره » et « القدم » absents. ⚠️ « 1998 » apparaît 1 fois, mais c'est un NUMÉRO DE HADITH (« 1998 - حدثنا زكريا… », تفسير ابن المنذر p. 790) et non une année — vérifié en ouvrant le chunk. Le corpus ne parle pas de football."}
+{"id": "q068", "question": "ما هي أعراض ارتفاع ضغط الدم؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « اعراض », « ارتفاع » et « ضغط » absents (0 chunk). « الدم » existe (20 chunks : questions de ديات et de طهارة) mais aucun ne traite de médecine : le corpus est un corpus de fiqh et de tafsir."}
+{"id": "q069", "question": "كم عدد سكان مدينة طوكيو؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « طوكيو » absent de l'index (0 chunk)."}
+{"id": "q070", "question": "ما هي عاصمة كندا؟", "lang": "ar", "status": "validated", "expected": [], "notes": "Hors corpus : « عاصمه » et « كندا » absent de l'index (0 chunk)."}
+{"id": "q071", "question": "Qui a écrit Les Misérables ?", "lang": "fr", "status": "validated", "expected": [], "notes": "Hors corpus : littérature française, aucun rapport avec trois ouvrages de fiqh et de tafsir. La langue ne suffit pas à conclure — la question serait tout aussi impossible posée en arabe — mais le sujet n'est traité nulle part."}
+{"id": "q072", "question": "Quel est le traitement du diabète de type 2 ?", "lang": "fr", "status": "validated", "expected": [], "notes": "Hors corpus : médecine moderne. Le corpus ne contient aucune matière médicale."}
+{"id": "q073", "question": "Quelle est la recette de la tarte tatin ?", "lang": "fr", "status": "validated", "expected": [], "notes": "Hors corpus : cuisine."}
+{"id": "q074", "question": "Combien d'os compte le squelette humain adulte ?", "lang": "fr", "status": "validated", "expected": [], "notes": "Hors corpus : anatomie humaine. Le corpus mentionne des blessures (ديات) mais ne décrit jamais le corps humain comme le ferait un traité d'anatomie."}
