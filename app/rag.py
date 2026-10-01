@@ -615,6 +615,14 @@ def repondre_par_refus_puis_selection(question, documents, sources, language="ar
     `repondre_par_selection` : ``0`` pour un renoncement, ``None`` pour une
     lecture impossible.
 
+    ⚠️ ``brute`` est la sortie qui a **DÉCIDÉ** — le brouillon de la question
+    ouverte — et non celle de la sélection. C'est ce brouillon qu'il faut pouvoir
+    relire : un renoncement manqué par le détecteur ne se voit QUE dans le texte
+    du modèle, et il serait écrasé dès que le second appel part. Mesuré : ce régime
+    renonce **26 fois sur 48** là où le texte libre seul en renonce 34 ; l'écart
+    est soit un refus manqué, soit un modèle qui a moins refusé — et **sans ce
+    brouillon, les deux causes sont indiscernables**.
+
     ⚠️ POURQUOI DEUX RÉGIMES PLUTÔT QU'UN. Mesuré sur les 24 questions SANS
     réponse dans le corpus (2 répétitions, 48 essais) :
 
@@ -652,7 +660,15 @@ def repondre_par_refus_puis_selection(question, documents, sources, language="ar
         return "", 0, brouillon
 
     # 2. Le modèle n'a pas renoncé : on ANCRE la réponse dans un passage réel.
-    return repondre_par_selection(question, documents, sources, language)
+    #
+    # ⚠️ Le brouillon reste la sortie BRUTE rendue, et non celle de la sélection :
+    # c'est lui qui porte la décision. Le perdre rendrait un renoncement manqué
+    # indiagnosticable — on ne saurait pas si le modèle a refusé sans être reconnu,
+    # ou s'il n'a pas refusé du tout.
+    texte, rang, _brute_selection = repondre_par_selection(
+        question, documents, sources, language
+    )
+    return texte, rang, brouillon
 
 
 def generate_selection(question, contexte, language="ar", nombre_de_passages=0):
