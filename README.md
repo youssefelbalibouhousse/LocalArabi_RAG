@@ -578,16 +578,51 @@ ancre ensuite la réponse dans un passage réel.
 | régime, sur les 24 questions hors corpus × 2 | renonce |
 |---|---|
 | sélection seule | 4 / 48 — 8,3 % |
-| **`refus_puis_selection`**, mesuré | **27 / 48 — 56,3 %** |
-| **`refus_puis_selection`**, détecteur corrigé (recompté hors ligne) | **33 / 48 — 68,8 %** |
+| **`refus_puis_selection`**, confirmé | **30 / 48 — 62,5 %** |
 | texte libre seul | 34 / 48 — 70,8 % |
 
-**Six fois et demie mieux que la sélection seule, et zéro choix illisible** (48/48).
+**Sept fois et demie mieux que la sélection seule, et zéro choix illisible** (48/48).
 Le coût tombe du bon côté : un seul appel quand la réponse est absente, deux quand
 elle est présente. Le texte du premier appel n'est jamais montré — il sert à
 décider, et c'est ce qui permet d'utiliser `generate` (un appel) au lieu
 d'`answer_question`, dont la reprise de langue coûterait un appel de plus pour un
 texte qu'on jette.
+
+#### D'où viennent les 30 : la décomposition, et ce qu'elle dit du plafond
+
+Le rapport consigne maintenant **quelle étape** a renoncé, parce que les deux n'ont
+pas la même fiabilité (le premier appel renonce ~65 % du temps, la sélection 8 %) :
+
+| les 48 essais | |
+|---|---|
+| renonce au **1er** appel — le détecteur a vu un refus | **27** |
+| renonce au **2e** appel — la sélection a rendu `{"passage": 0}` | **3** |
+| un passage est montré | 18 |
+| → dont **refus manqués** (relevés en lisant) | **1** |
+| → dont vraies réponses du modèle | 17 |
+
+**Le détecteur n'est plus le facteur limitant : il manque 1 refus sur 28 (3,6 %).**
+Et le plafond du régime est désormais visible : il ne peut pas dépasser **le taux de
+refus du modèle dans son brouillon** — 28 sur 48 ici (58 %), plus les quelques
+renoncements de la sélection. Sur les 20 brouillons qui n'étaient pas des refus,
+**17 ont produit un passage** et 3 ont été rattrapés par la sélection.
+
+#### ⚠️ La règle à deux signaux : +2 mesurés, pas +6
+
+Elle avait été écrite sur 48 réponses, et y rattrapait **6 refus sur 6**. Sur
+l'échantillon **frais** de la confirmation, la comparaison appariée — **les mêmes
+brouillons, les deux détecteurs** — donne :
+
+| sur les 48 brouillons de la confirmation | |
+|---|---|
+| ancien détecteur (formules exactes) | 25 |
+| **nouveau (formules + deux signaux)** | **27** |
+
+**+2, pas +6.** L'écart est la différence entre un ajustement et une mesure : le 6/6
+était un ajustement sur les réponses qui avaient servi à écrire la règle. Les +2
+sont réels et reproductibles (les deux cas sont `لا توجد أي معلومات في…` et
+`لا توجد إشارة إلى…`, où la négation et la référence à la source sont séparées),
+mais ils sont quatre fois plus modestes que ce que l'ajustement laissait croire.
 
 #### L'écart de 6 points était le DÉTECTEUR, et il a fallu lire pour le savoir
 
