@@ -527,18 +527,49 @@ Mesuré sur les **24 questions sans réponse dans le corpus** (48 essais) :
 
 **Sur 20 des 24 questions hors corpus, le modèle n'a jamais renoncé.** L'invention
 de *texte* est supprimée ; la *mauvaise réponse* ne l'est pas. Le mécanisme change
-donc la nature de l'échec, il ne le supprime pas :
+donc la nature de l'échec, il ne le supprime pas.
+
+⚠️ **La comparaison avec le texte libre a été faite, et elle est sévère pour la
+sélection.** Les deux régimes ont été mesurés sur les **mêmes 24 questions × 2
+essais (48)** :
 
 | | texte libre | sélection de passage |
 |---|---|---|
-| sur une question hors corpus | refuse **12 / 15**, mais **invente 3 fois** | ne renonce que **4 / 48** |
-| ce qui est montré | une réponse qui peut être fabriquée | un passage **réel**, qui peut ne pas répondre |
-| vérifiable par le lecteur | non (l'invention a le vocabulaire du corpus) | **oui** (le passage est dans son livre) |
+| **renonce** | **34 / 48 — 71 %** | **4 / 48 — 8 %** |
+| ne renonce pas | 14 / 48 — 29 % | 44 / 48 — 92 % |
 
-Aucun des deux régimes n'est livrable tel quel, et ils échouent en sens opposés.
-Fait notable : le modèle **sait** refuser (12/15 en texte libre) mais ne le fait
-presque jamais quand on lui demande de **choisir** — une question à choix multiple
-appelle une réponse, là où une question ouverte admet l'ignorance.
+⚠️ Le détecteur par phrase n'en comptait que **27** : il a **manqué 7 refus sur 34
+(21 %)**, tous des reformulations parfaitement légitimes (« لا أجد الإجابة في
+السياق السابق », « لا يوجد صلة للسؤال في السياق », « لا تجد الإجابة في السياق
+المذكور »). Le chiffre définitif vient d'une **lecture** des 21 réponses non
+comptées — c'est la seule méthode que ce projet ait trouvée fiable, et le détecteur
+se trompe encore ici, dans le sens qui fait passer le système pour pire qu'il n'est.
+
+⚠️ **Et le découpage explique l'ancien « 12 / 15 », qui m'avait induit en erreur :**
+
+| sous-population | renonce | invente |
+|---|---|---|
+| 15 questions éloignées (astronomie, cuisine, football) | 24 / 30 — 80 % | 6 / 30 |
+| 9 questions proches du domaine (banque, bourse, organes…) | 10 / 18 — 56 % | **8 / 18 — 44 %** |
+
+Le « 12 / 15 » ne portait que sur les **éloignées**, c'est-à-dire les faciles. Sur
+les mêmes questions, le texte libre renonce **71 %**, et **56 % seulement** là où
+c'est difficile. Comparer ce chiffre à la sélection mesurée sur les 24 questions
+revenait à avantager le texte libre.
+
+Les 14 non-refus sont de la pire espèce, et deux se **contredisent** : à « ما حكم
+استخدام مكبر الصوت في الأذان » le modèle a répondu « لا يباح » puis « لا بأس به »,
+à une minute d'intervalle. Ailleurs : « عام 1989 » (chute du mur de Berlin), « Au »
+(symbole chimique de l'or), « لا. » puis « لا. » à une question sur la piqûre
+intraveineuse, et une recette de couscous.
+
+**Conclusion : le texte libre renonce 71 % du temps, la sélection 8 %.** Le premier
+sait dire « je ne sais pas », le second ne le dit pas — mais le premier invente du
+texte, et le second le rend impossible. C'est ce qui justifie la piste suivante :
+**combiner les deux**, la question ouverte décidant s'il faut renoncer, la sélection
+servant ensuite à *ancrer* la réponse dans un passage réel. Le coût tombe du bon
+côté — un seul appel sur une question sans réponse, deux sur une question où
+l'utilisateur attend vraiment quelque chose.
 
 #### Une affirmation retirée du gabarit
 
