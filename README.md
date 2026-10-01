@@ -440,12 +440,56 @@ Ce qui distingue une citation d'une invention n'est pas lexical, c'est **sémant
 Puisqu'aucun contrôle *a posteriori* ne fonctionne sur du texte libre, il reste à
 changer ce qu'on demande au modèle : **une citation verbatim du contexte à l'appui
 de chaque affirmation**. Le contrôle devient alors exact — la citation est dans le
-contexte, ou elle n'y est pas — et le modèle ne peut pas tricher : inventer une
-citation la fait échouer au contrôle, et ne pas en fournir le force au refus.
+contexte, ou elle n'y est pas.
 
-C'est le seul mécanisme où la vérification n'a pas besoin de comprendre le sens.
-Il reste à le tester avec `scripts/mesurer_reponses.py --repetitions`, et à
-mesurer son coût : un modèle qui ne se conforme pas produirait des refus à tort.
+C'est implémenté et mesuré : `CITATIONS_OBLIGATOIRES` (désactivé par défaut)
+exige la citation entre `[[ ]]` — un délimiteur absent du corpus, contrairement
+aux guillemets arabes « » qui ponctuent les textes édités — et
+`fidelite.citations_non_verifiees()` vérifie chaque citation **littéralement**,
+après normalisation arabe. Mesuré sur deux populations, deux exécutions chacune :
+
+| | 18 réponses hors corpus | 12 réponses à des questions répondables |
+|---|---|---|
+| refus | 4 | 0 |
+| **citation vérifiée** | 4 | 4 |
+| aucune citation | 9 | 5 |
+| **citation fabriquée** | 1 | **3** |
+| → deviendraient des refus si l'on exigeait la citation | 10 / 18 | **8 / 12** |
+
+**Le mécanisme marche comme détecteur, échoue comme empêchement.**
+
+- Il **démontre** une invention quand le modèle cite : `q083` a cité « إن القاضي
+  فإنه يحكم بشيء يجده في ديوانه بخطه » pour une question sur les banques — cette
+  phrase n'est pas dans le contexte. Le régime normal ne laissait aucune prise.
+- Mais le modèle **n'obéit qu'un tiers du temps** (9 réponses sans citation sur 18,
+  5 sur 12), et **fabrique la citation 3 fois sur 12 sur des questions où la
+  réponse existe pourtant**. L'invention n'est donc pas empêchée : elle reste
+  seulement *détectable quand le modèle choisit de citer*.
+- **Exiger la citation n'est pas livrable** : cela refuserait deux tiers des
+  questions auxquelles le système sait répondre. Le produit deviendrait inutilisable.
+
+⚠️ Et même une citation **vérifiée** n'est pas une réponse **juste** : les quatre
+citations validées sur les questions hors corpus étaient **toutes hors sujet**
+(`q075` répond sur les actions en citant une règle sur la dette). La citation rend
+une réponse *vérifiable*, pas *correcte*.
+
+### La voie qui reste : ne plus laisser le modèle écrire de texte libre
+
+Les quatre tentatives échouent toutes sur le même mur, et il faut le nommer :
+**une génération libre est invérifiable**, parce que le modèle écrit dans la langue
+du corpus et que rien de lexical ne distingue ce qu'il a lu de ce qu'il sait.
+
+La seule voie qui reste est **structurelle** : faire *sélectionner* au modèle un
+passage parmi ceux qui ont été récupérés — ou déclarer qu'aucun ne convient — au
+lieu de le laisser rédiger. Le texte montré à l'utilisateur serait alors **toujours
+un passage du corpus**, avec sa référence, et l'invention deviendrait
+**impossible par construction** plutôt que détectée après coup. Ce qui resterait
+possible est de choisir le mauvais passage — et cela, l'utilisateur peut le voir
+en lisant le passage cité, puisque ce passage est dans le livre.
+
+C'est le renversement que ces mesures imposent : on ne cherche plus à *vérifier*
+ce que le modèle écrit, on l'empêche d'écrire ce qui ne se vérifie pas. Reste à le
+construire et à le mesurer.
 
 > Le projet le disait depuis le début, pour la qualité des réponses : « mesurer si
 > la réponse est bonne demande un juge ». Les trois échecs ci-dessus ne font que
