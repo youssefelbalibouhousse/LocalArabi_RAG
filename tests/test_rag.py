@@ -872,6 +872,32 @@ def test_le_passage_choisi_est_rendu_avec_sa_reference():
     assert "42" in texte
 
 
+def test_le_gabarit_n_affirme_pas_que_le_passage_repond():
+    """Le titre ne doit affirmer que ce que le système SAIT.
+
+    Il disait « المقطع الذي يجيب عن السؤال » — « le passage qui répond à la
+    question ». Or mesuré sur 24 questions SANS réponse dans le corpus (48
+    essais), le modèle n'a renoncé que 4 fois : dans les 44 autres cas, ce titre
+    aurait affirmé une chose fausse, sous une forme que l'utilisateur n'a aucun
+    moyen de contester puisqu'elle vient du système et non du texte.
+
+    Le système sait quel passage il a choisi ; il ne sait pas si ce passage
+    répond. Il ne doit donc l'affirmer dans AUCUN cas — pas même quand c'est vrai,
+    puisque c'est invérifiable de son côté.
+    """
+    document = "نص"
+    source = {"source": "a.epub", "title": "Livre A", "page": 1, "line_start": 1, "line_end": 2}
+
+    arabe = rag.format_passage_choisi(document, source, language="ar")
+    francais = rag.format_passage_choisi(document, source, language="fr")
+
+    assert "يجيب عن السؤال" not in arabe
+    assert "répond à la question" not in francais
+    # Le titre reste, mais il dit une chose VÉRIFIABLE : ce passage a été choisi.
+    assert "المختار" in arabe
+    assert "sélectionné" in francais
+
+
 def test_la_selection_rend_le_passage_et_son_rang(monkeypatch):
     """Le protocole par DÉFAUT, de bout en bout : sortie JSON contrainte."""
     documents = ["نص أول", "نص ثانٍ يجيب عن السؤال"]
@@ -897,7 +923,32 @@ def test_la_selection_s_abstient_quand_aucun_passage_ne_repond(monkeypatch):
     )
 
     assert texte == ""
-    assert choix is None
+    assert choix == 0
+    assert brute == '{"passage": 0}'
+
+
+def test_l_abstention_est_rendue_comme_0_et_non_comme_un_echec(monkeypatch):
+    """⚠️ Test de NON-RÉGRESSION sur un bug qui a faussé une mesure publiée.
+
+    Le code faisait ``if not choix:`` dans `repondre_par_selection`. Comme ``0``
+    est falsy en Python, une abstention — qui est une RÉPONSE, et la bonne sur
+    une question que le corpus ne peut pas trancher — était rendue comme un échec
+    de lecture. Le rapport annonçait donc « **0 abstention sur 48** » là où il y
+    en avait **4**, dans le sens le plus défavorable au mécanisme.
+
+    ``0`` et ``None`` mènent au même texte vide, et c'est précisément pourquoi la
+    confusion ne se voyait pas : elle ne se lit que dans le second élément du
+    triplet. Même famille de piège que ``all([])`` dans `est_orpheline`.
+    """
+    monkeypatch.setattr(rag, "generate_selection", lambda q, c, lang, n: '{"passage": 0}')
+
+    texte, choix, brute = rag.repondre_par_selection(
+        "سؤال", ["نص"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert choix == 0          # une réponse
+    assert choix is not None   # et surtout PAS un échec de lecture
+    assert texte == ""         # rien à montrer, et c'est voulu
     assert brute == '{"passage": 0}'
 
 

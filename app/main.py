@@ -239,12 +239,24 @@ def ask(
     # langue du corpus, et rien de lexical ne distingue ce qu'il a lu de ce qu'il
     # sait. Ce qui reste possible ici est de choisir le mauvais passage, et
     # l'utilisateur le voit en lisant le passage cité.
+    #
+    # ⚠️ MESURÉ : ce mécanisme N'EMPÊCHE PAS de désigner un passage qui ne répond
+    # pas. Sur 24 questions SANS réponse dans le corpus (48 essais), le modèle n'a
+    # renoncé que 4 fois : dans les 44 autres cas, il a désigné un passage, et
+    # aucun ne répondait. L'invention de TEXTE est supprimée ; la mauvaise réponse
+    # ne l'est pas — elle est seulement devenue VÉRIFIABLE, puisque le passage
+    # affiché est une vraie page du livre.
     if config.SELECTION_PASSAGE:
         texte, choix, _brute = rag.repondre_par_selection(question, docs, sources, language)
+        # ⚠️ `choix > 0`, et non une simple vérité : 0 est une ABSTENTION (le
+        # modèle déclare qu'aucun passage ne répond) et None une LECTURE
+        # IMPOSSIBLE. Les deux mènent au même `no_info`, mais les confondre a
+        # déjà fait publier « 0 abstention sur 48 » là où il y en avait 4.
+        repondu = choix is not None and choix > 0
         return {
             "question": question,
-            "answer": texte if choix else no_info,
-            "sources": [sources[choix - 1]] if choix else [],
+            "answer": texte if repondu else no_info,
+            "sources": [sources[choix - 1]] if repondu else [],
             "context_used": docs,
             "language": language,
         }

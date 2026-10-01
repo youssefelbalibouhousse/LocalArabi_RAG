@@ -473,23 +473,94 @@ citations validées sur les questions hors corpus étaient **toutes hors sujet**
 (`q075` répond sur les actions en citant une règle sur la dette). La citation rend
 une réponse *vérifiable*, pas *correcte*.
 
-### La voie qui reste : ne plus laisser le modèle écrire de texte libre
+### La voie structurelle : ne plus laisser le modèle écrire de texte libre
 
 Les quatre tentatives échouent toutes sur le même mur, et il faut le nommer :
 **une génération libre est invérifiable**, parce que le modèle écrit dans la langue
 du corpus et que rien de lexical ne distingue ce qu'il a lu de ce qu'il sait.
 
-La seule voie qui reste est **structurelle** : faire *sélectionner* au modèle un
-passage parmi ceux qui ont été récupérés — ou déclarer qu'aucun ne convient — au
-lieu de le laisser rédiger. Le texte montré à l'utilisateur serait alors **toujours
-un passage du corpus**, avec sa référence, et l'invention deviendrait
-**impossible par construction** plutôt que détectée après coup. Ce qui resterait
-possible est de choisir le mauvais passage — et cela, l'utilisateur peut le voir
-en lisant le passage cité, puisque ce passage est dans le livre.
+La voie structurelle était donc la seule qui restait : faire **sélectionner** au
+modèle un passage parmi ceux qui ont été récupérés — ou déclarer qu'aucun ne
+convient — au lieu de le laisser rédiger. Le texte montré à l'utilisateur est
+alors **toujours un passage du corpus**, avec sa référence : l'invention devient
+**impossible par construction** plutôt que détectée après coup.
 
-C'est le renversement que ces mesures imposent : on ne cherche plus à *vérifier*
-ce que le modèle écrit, on l'empêche d'écrire ce qui ne se vérifie pas. Reste à le
-construire et à le mesurer.
+**C'est construit et mesuré** (`SELECTION_PASSAGE`, désactivé par défaut).
+
+#### Ce que la construction a coûté à découvrir
+
+Le premier protocole demandait au modèle d'écrire un **numéro**. Il a répondu
+`370`, `369`, `1062` — des numéros de **ligne** : le corpus en porte un en tête de
+*chaque* ligne (« 369 - وأجمعوا… »). L'invite contenait donc deux numérotations
+concurrentes de même forme. Ma conclusion suivante — « il faut des lettres » — était
+**fausse**, et la mesure l'a démenti : avec des lettres, le modèle a rendu `أ` et
+`د`, c'est-à-dire « حرف المقطع » traduit dans *son* alphabet (أ، ب، ج، د), et
+`1062` est revenu. **Changer d'alphabet déplace l'ambiguïté, elle ne disparaît
+pas** : la cause est que la sortie est du texte libre.
+
+La correction qui agit sur la cause est de **contraindre la sortie** : le schéma
+JSON passé au client (`{"passage": entier 0..n}`) est appliqué *pendant la
+génération des tokens*. Un numéro de ligne recopié ne **peut plus** sortir.
+
+| protocole (12 questions × 2) | choix tombant sur la page attendue | illisibles |
+|---|---|---|
+| numéro, texte libre | 12 puis 11 / 24 | 3 puis 5 |
+| lettre, texte libre | 8 / 24 | 6 |
+| **JSON contraint** | **15 / 24** | **0** |
+| *base « prendre le premier extrait », sans modèle* | *10 / 24* | — |
+| *plafond de la récupération (le bon extrait était visible)* | *20 / 24* | — |
+
+⚠️ La base « rang 1 » est indispensable à la lecture : montrer le premier extrait
+**sans appeler le modèle** réussit déjà **30 / 59** (50,8 %) sur les 59 répondables.
+Un taux de choix justes qui ne la dépasse pas signifie que le modèle coûte 70 s par
+question pour faire moins bien que rien.
+
+#### ⚠️ Et ce qu'il NE fait pas : le mécanisme n'empêche pas de désigner un mauvais passage
+
+Mesuré sur les **24 questions sans réponse dans le corpus** (48 essais) :
+
+| | |
+|---|---|
+| abstentions du modèle (« aucun passage ne répond ») | **4 / 48** |
+| passages désignés malgré tout | **44 / 48** |
+| choix illisibles | **0 / 48** |
+
+**Sur 20 des 24 questions hors corpus, le modèle n'a jamais renoncé.** L'invention
+de *texte* est supprimée ; la *mauvaise réponse* ne l'est pas. Le mécanisme change
+donc la nature de l'échec, il ne le supprime pas :
+
+| | texte libre | sélection de passage |
+|---|---|---|
+| sur une question hors corpus | refuse **12 / 15**, mais **invente 3 fois** | ne renonce que **4 / 48** |
+| ce qui est montré | une réponse qui peut être fabriquée | un passage **réel**, qui peut ne pas répondre |
+| vérifiable par le lecteur | non (l'invention a le vocabulaire du corpus) | **oui** (le passage est dans son livre) |
+
+Aucun des deux régimes n'est livrable tel quel, et ils échouent en sens opposés.
+Fait notable : le modèle **sait** refuser (12/15 en texte libre) mais ne le fait
+presque jamais quand on lui demande de **choisir** — une question à choix multiple
+appelle une réponse, là où une question ouverte admet l'ignorance.
+
+#### Une affirmation retirée du gabarit
+
+Le titre du passage affiché disait « **المقطع الذي يجيب عن السؤال** — le passage
+qui répond à la question ». C'est une affirmation que le système n'est pas en
+mesure de tenir : dans 44 des 48 cas ci-dessus, elle aurait été **fausse**, sous
+une forme que l'utilisateur n'a aucun moyen de contester puisqu'elle vient du
+système et non du texte. Il dit maintenant que le passage a été **sélectionné**, ce
+qui est vérifiable, et invite à le contrôler : « المقطع المختار من الكتاب (يُرجى
+التحقّق منه) ».
+
+#### Un chiffre faux, publié, et corrigé
+
+Le premier rapport annonçait « **0 abstention sur 48** ». C'était mon code qui
+mentait : `if not choix:` — `0` étant falsy en Python, l'abstention était rendue
+comme un échec de lecture. Il y en avait **4**. L'erreur allait dans le sens le
+plus défavorable au mécanisme, et elle était invisible à la lecture du chiffre :
+`0` et `None` produisent le **même texte vide**, et ne se distinguent que par le
+second élément du triplet retourné. Même famille de piège que `all([])` dans
+`est_orpheline`. C'est pourquoi la sortie **brute** du modèle est conservée dans
+les rapports — c'est elle qui a permis de recompter sans refaire les 30 minutes de
+mesure.
 
 > Le projet le disait depuis le début, pour la qualité des réponses : « mesurer si
 > la réponse est bonne demande un juge ». Les trois échecs ci-dessus ne font que
