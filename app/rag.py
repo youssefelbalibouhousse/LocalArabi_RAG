@@ -273,6 +273,49 @@ def _retrieve_hybride(collection, question, n_results):
     return docs, sources
 
 
+def _invite_citations(question, context, language):
+    """Invite qui EXIGE une citation verbatim du contexte.
+
+    Variante expérimentale (voir `config.CITATIONS_OBLIGATOIRES`). Le délimiteur
+    `[[ ]]` est choisi parce qu'il est facile à taper et ABSENT du corpus : les
+    guillemets arabes « » y ponctuent les textes édités, et ne permettraient pas
+    de distinguer la citation du commentaire.
+
+    ⚠️ La consigne de langue reste EN DERNIER, comme dans l'invite normale : c'est
+    l'invariant du projet, et il vaut pour toutes les variantes.
+    """
+    if language == "fr":
+        return f"""Utilise uniquement le contexte ci-dessous pour répondre.
+
+Contexte extrait :
+{context}
+
+Question : {question}
+
+Règle : chaque affirmation doit s'appuyer sur un passage RECOPIÉ LITTÉRALEMENT du contexte, placé entre [[ et ]] — par exemple [[le passage recopié]]. Ne reformule pas ce passage.
+
+Si le contexte ne contient aucun passage qui appuie la réponse, écris uniquement cette phrase : « Désolé, il n'y a pas assez d'informations dans les documents fournis. »
+
+Consigne de langue, impérative : les extraits ci-dessus sont en arabe, mais tu dois rédiger ta réponse UNIQUEMENT EN FRANÇAIS. N'écris aucune phrase en arabe.
+
+Réponse en français :"""
+
+    return f"""استخدم السياق أدناه فقط للإجابة على السؤال.
+
+السياق المستخرج:
+{context}
+
+السؤال: {question}
+
+قاعدة إلزامية: كل حكم تذكره يجب أن يستند إلى نص منقول حرفيًا من السياق، موضوع بين [[ و ]]، هكذا: [[النص المنقول]]. انقل النص كما هو دون إعادة صياغة.
+
+إذا لم تجد في السياق أي نص يدعم الجواب، فاكتب هذه الجملة وحدها: "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة"
+
+تنبيه إلزامي: يجب أن تكتب إجابتك باللغة العربية فقط، ولا تكتب أي جملة بلغة أخرى.
+
+الإجابة بالعربية:"""
+
+
 def build_prompt(question, context, language="ar"):
     """Construit l'invite envoyée au modèle, dans la langue demandée.
 
@@ -301,6 +344,9 @@ def build_prompt(question, context, language="ar"):
     durcissement, mesurer PLUSIEURS exécutions par question — c'est le seul
     protocole qui puisse trancher.
     """
+    if config.CITATIONS_OBLIGATOIRES:
+        return _invite_citations(question, context, language)
+
     if language == "fr":
         return f"""Utilise uniquement le contexte ci-dessous pour répondre précisément à la question. Si le contexte ne contient pas la réponse, dis : « Désolé, il n'y a pas assez d'informations dans les documents fournis. ».
 

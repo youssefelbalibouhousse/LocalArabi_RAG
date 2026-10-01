@@ -121,3 +121,68 @@ def exemples(elements: Sequence[str], maximum: int = 5) -> str:
     reste = len(elements) - len(montres)
     texte = ", ".join(montres)
     return f"{texte} (+{reste})" if reste > 0 else texte
+
+
+# --- La citation verbatim -------------------------------------------------
+#
+# POURQUOI cette seconde voie existe, après l'échec de la première. Chercher les
+# ÉLÉMENTS d'une réponse libre dans le contexte ne marche pas : mesuré sur sept
+# réponses non-refus, 0 attrapée par les nombres, 3 par les mots, et 3
+# inchécables parce qu'elles font un à trois mots. La raison est constante — les
+# inventions du modèle sont faites du vocabulaire du corpus. Ce qui distingue une
+# citation d'une invention est SÉMANTIQUE, pas lexical.
+#
+# D'où le renversement : ne plus vérifier une réponse libre, mais exiger du modèle
+# qu'il produise une CITATION, et vérifier cette citation. La vérification
+# redevient exacte — la citation est dans le contexte, ou elle n'y est pas — et
+# le modèle ne peut pas tricher : inventer une citation la fait échouer, ne pas en
+# fournir le force au refus.
+#
+# ⚠️ Les délimiteurs sont `[[` et `]]` : faciles à taper pour un modèle, et
+# ABSENTS du corpus, ce qui évite toute confusion avec les guillemets arabes
+# « » qui, eux, ponctuent les textes édités.
+
+OUVERTURE = "[["
+FERMETURE = "]]"
+
+
+def citations(reponse: str) -> tuple[str, ...]:
+    """Les citations que la réponse place entre ``[[`` et ``]]``.
+
+    Une réponse qui n'en contient aucune n'est pas vérifiable — c'est un fait, pas
+    un jugement : `citations` rend une liste vide, et c'est à l'appelant de
+    décider ce qu'il en fait.
+    """
+    morceaux = reponse.split(OUVERTURE)[1:]
+    return tuple(
+        contenu.split(FERMETURE)[0].strip()
+        for contenu in morceaux
+        if FERMETURE in contenu
+    )
+
+
+def _forme_comparable(texte: str) -> str:
+    """Forme comparable pour une comparaison LITTÉRALE de texte.
+
+    La comparaison reste littérale — elle ne cherche pas des mots, elle cherche
+    la phrase — mais elle tolère ce qui ne change pas le texte : les diacritiques
+    que le modèle ajoute ou omet, les variantes de lettres, et les espaces.
+    """
+    return " ".join(normaliser(texte).split())
+
+
+def citations_non_verifiees(
+    reponse: str, contexte: str
+) -> tuple[str, ...]:
+    """Les citations de la réponse qui ne figurent PAS dans le contexte.
+
+    Comparaison après normalisation arabe, mais LITTÉRALE : c'est la phrase qui
+    doit s'y trouver, pas ses mots. Une citation qui échoue ici est une citation
+    fabriquée — le seul cas où l'invention est mécaniquement démontrable.
+    """
+    contexte_comparable = _forme_comparable(contexte)
+    return tuple(
+        citation
+        for citation in citations(reponse)
+        if _forme_comparable(citation) not in contexte_comparable
+    )

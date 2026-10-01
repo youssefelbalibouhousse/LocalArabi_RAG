@@ -141,6 +141,23 @@ if EMBEDDING_TIMEOUT < 1:
 # ne sont pas calibrées). Exemple d'activation : DISTANCE_THRESHOLD=1.0
 DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "-1"))
 
+# --- Citation verbatim (EXPÉRIMENTAL, désactivé par défaut) ---------------
+#
+# POURQUOI. Trois vérifications déterministes ont été essayées pour empêcher le
+# modèle d'inventer, et les trois ont échoué (voir README.md, « Trois
+# vérifications déterministes essayées, trois échecs »). La raison est constante :
+# les inventions sont faites du VOCABULAIRE du corpus, donc indistinguables
+# lexicalement. Ce qui distingue une citation d'une invention est sémantique.
+#
+# D'où le renversement : ne plus vérifier une réponse libre, mais exiger du
+# modèle une CITATION verbatim, et vérifier cette citation (`app/fidelite.py`).
+# La vérification redevient exacte — la citation est dans le contexte, ou elle
+# n'y est pas — et le modèle ne peut pas tricher.
+#
+# Pourquoi un drapeau : pour mesurer les deux régimes avec le MÊME code, comme
+# `HYBRID_ENABLED`. Un réglage qu'on ne peut pas comparer ne se démontre pas.
+CITATIONS_OBLIGATOIRES = _env_flag("CITATIONS_OBLIGATOIRES", False)
+
 # --- Recherche hybride (lexicale + vectorielle) ---------------------------
 #
 # POURQUOI elle existe, mesuré le 29/09 sur les 59 questions du jeu d'or :
