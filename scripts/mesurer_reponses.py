@@ -17,6 +17,12 @@ Deux leçons ont rendu ce script nécessaire.
    2 sur 9 là où il y en a 4 — deux fois dans le sens rassurant. Le compte de
    refus est donc affiché comme un INDICE, et les réponses brutes sont conservées
    dans le rapport : c'est la lecture qui tranche.
+3. **La latence ne se compare pas telle quelle.** La récupération étant
+   déterministe, la répétition n d'une question renvoie une invite IDENTIQUE à la
+   précédente : Ollama réutilise alors son cache de préfixe et répond en ~1 s au
+   lieu de ~70 s. Mesuré : q019 à 1 216 ms après un passage antérieur, q046 à
+   72 068 ms sur une invite neuve. Un écart de latence entre deux essais dit donc
+   qui a payé le préchargement, pas qui a été plus rapide.
 
 Ce que le rapport contient, et pourquoi
 ---------------------------------------
@@ -42,6 +48,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 GOLDEN_PATH = BASE_DIR / "eval" / "golden.jsonl"
 RESULTS_DIR = BASE_DIR / "eval" / "results"
 
+# Le terminal Windows par défaut (cp1252) ne sait pas écrire l'arabe : sans cela,
+# l'affichage d'un extrait fait planter la mesure APRÈS avoir payé les appels au
+# modèle — on perd la mesure entière pour un problème d'affichage. Le rapport est
+# de toute façon écrit en UTF-8 explicitement plus bas.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 SEPARATEUR = "─" * 68
 
 
@@ -59,10 +72,20 @@ def mesurer_question(collection, question, repetitions):
         contexte = "\n\n".join(docs)
 
         debut = time.perf_counter()
-        # Aucun extrait : l'API ne consulte pas le modèle (voir app/main.py).
-        reponse = (
-            rag.answer_question(question.question, contexte, question.lang) if docs else ""
-        )
+        choix = None
+        brute = ""
+        if not docs:
+            # Aucun extrait : l'API ne consulte pas le modèle (voir app/main.py).
+            reponse = ""
+        elif config.SELECTION_PASSAGE:
+            # Chemin de SÉLECTION : le modèle choisit un numéro, il ne rédige pas.
+            # Le texte rendu est un passage du corpus — l'invention est impossible
+            # par construction, et le rang choisi dit si le choix est le bon.
+            reponse, choix, brute = rag.repondre_par_selection(
+                question.question, docs, sources, question.lang
+            )
+        else:
+            reponse = rag.answer_question(question.question, contexte, question.lang)
         duree = (time.perf_counter() - debut) * 1000
 
         essais.append({
@@ -70,7 +93,16 @@ def mesurer_question(collection, question, repetitions):
             "answer": reponse,
             "context": docs,
             "sources": sources,
-            "refus": bool(rag.est_un_refus(reponse, question.lang)) if reponse else True,
+            "selection": choix,
+            # La sortie NON interprétée, conservée même quand elle est illisible :
+            # sans elle, « le modèle n'a rien écrit », « il a écrit un numéro hors
+            # bornes » et « il a écrit de la prose » sont indiscernables.
+            "selection_brute": brute,
+            "refus": (
+                choix is None
+                if config.SELECTION_PASSAGE
+                else (bool(rag.est_un_refus(reponse, question.lang)) if reponse else True)
+            ),
             # Les citations sont extraites et vérifiées ICI, et conservées dans le
             # rapport : c'est le seul verdict mécaniquement démontrable. Une
             # citation absente du contexte est une invention PROUVÉE — là où une
@@ -103,6 +135,97 @@ def _apercu(texte, longueur=220):
     if not texte:
         return "(aucune réponse : la récupération n'a rien rendu)"
     return " ".join(texte.split())[:longueur]
+
+
+def _rang_attendu(sources, expected):
+    """Rang (1-indexé) du premier extrait qui porte la page attendue, ou None."""
+    for rang, source in enumerate(sources, start=1):
+        if any(evaluation.source_matches(source, attendu) for attendu in expected):
+            return rang
+    return None
+
+
+def _bilan_selection(questions, resultats):
+    """Compte les choix du chemin de sélection — séparément par population.
+
+    Sur une question **répondable**, « juste » veut dire : le passage choisi est
+    celui que la question désigne (même source, même page). Sur une question
+    **hors corpus**, il n'y a rien à choisir : la seule issue juste est
+    l'abstention (``0``).
+
+    Les deux populations ne se comptent donc pas ensemble : un taux global
+    mélangerait « a bien choisi » et « a bien renoncé », qui ne sont pas la même
+    compétence.
+
+    ⚠️ Deux chiffres ne disent rien sans un TROISIÈME, et c'est le plus
+    important : **prendre systématiquement le premier extrait**, sans aucun appel
+    au modèle, réussit déjà 50,8 % des questions sur les 59 du jeu d'or. Un taux
+    de choix justes inférieur à cette base signifierait que le modèle coûte 70 s
+    par question pour faire moins bien que de ne rien lui demander. La base est
+    donc calculée **sur les mêmes questions**, à côté du plafond de récupération
+    (« le bon extrait était-il seulement visible parmi les 5 ? »).
+    """
+    par_id = {question.id: question for question in questions}
+    bilan = {
+        "repondables": {
+            "essais": 0,
+            "visibles": 0,
+            "rang1_juste": 0,
+            "justes": 0,
+            "abstentions": 0,
+        },
+        "hors_corpus": {"essais": 0, "abstentions": 0, "choix": 0},
+        "illisibles": 0,
+        "questions": 0,
+        "questions_choix_stable": 0,
+    }
+    for resultat in resultats:
+        question = par_id[resultat["id"]]
+        population = bilan["hors_corpus" if question.est_hors_corpus else "repondables"]
+        bilan["questions"] += 1
+        choix_vus = {
+            essai["selection"] for essai in resultat["attempts"]
+        }
+        if len(choix_vus) == 1:
+            # Un choix IDENTIQUE d'une répétition à l'autre : la tâche fermée est
+            # reproductible, là où la rédaction libre ne l'était pas.
+            bilan["questions_choix_stable"] += 1
+
+        for essai in resultat["attempts"]:
+            population["essais"] += 1
+            choix = essai["selection"]
+            if choix is None:
+                # Ni un chiffre exploitable, ni « 0 » : le modèle n'a pas joué le
+                # jeu. C'est un échec du protocole, pas un choix — compté à part.
+                bilan["illisibles"] += 1
+
+            if question.est_hors_corpus:
+                if choix == 0:
+                    population["abstentions"] += 1
+                elif choix is not None:
+                    population["choix"] += 1
+                continue
+
+            # Ce que la SÉLECTION ne peut pas corriger, et qu'il faut donc compter
+            # à part : choisir juste exige que le bon extrait soit visible. Compté
+            # pour TOUS les essais, choix illisible compris — c'est une propriété
+            # de la récupération, pas du modèle.
+            rang = _rang_attendu(essai["sources"], question.expected)
+            if rang is not None:
+                population["visibles"] += 1
+                if rang == 1:
+                    population["rang1_juste"] += 1
+
+            if choix == 0:
+                population["abstentions"] += 1
+            elif choix is not None and choix <= len(essai["sources"]):
+                choisi = essai["sources"][choix - 1]
+                if any(
+                    evaluation.source_matches(choisi, attendu)
+                    for attendu in question.expected
+                ):
+                    population["justes"] += 1
+    return bilan
 
 
 def mode_rapport(args):
@@ -164,6 +287,12 @@ def mode_rapport(args):
         if not essai["refus"]
         and (essai["citations_fabriquees"] or not essai["citations"])
     ]
+    # En mode sélection le modèle ne RÉDIGE plus : il n'écrit aucune citation, et
+    # le compteur ci-dessus mesurerait l'absence d'une chose qui n'est plus
+    # demandée. On le neutralise au lieu d'afficher un chiffre trompeur.
+    bilan_selection = (
+        _bilan_selection(questions, resultats) if config.SELECTION_PASSAGE else None
+    )
     rapport = {
         "label": label,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -173,12 +302,17 @@ def mode_rapport(args):
             "repetitions": args.repetitions,
             "n_results_app": config.N_RESULTS,
             "hybride": config.HYBRID_ENABLED,
+            "selection_passage": config.SELECTION_PASSAGE,
+            "selection_etiquettes": config.SELECTION_ETIQUETTES,
+            "selection_choix": config.SELECTION_CHOIX,
+            "citations_obligatoires": config.CITATIONS_OBLIGATOIRES,
         },
         "summary": {
             "questions": len(resultats),
             "reponses": total,
             "refus_reconnus": refus,
-            "non_verifiables": len(non_verifiables),
+            "non_verifiables": len(non_verifiables) if not config.SELECTION_PASSAGE else None,
+            "selection": bilan_selection,
         },
         "results": resultats,
     }
@@ -192,16 +326,59 @@ def mode_rapport(args):
     print("")
     print(SEPARATEUR)
     print(f"Réponses mesurées      : {total}")
+    if bilan_selection:
+        repondables = bilan_selection["repondables"]
+        hors_corpus = bilan_selection["hors_corpus"]
+        print(
+            f"Sélection (répondables) : {repondables['justes']} / {repondables['essais']}"
+            "   choix tombant sur la page attendue"
+        )
+        print(
+            f"   plafond récupération : {repondables['visibles']} / {repondables['essais']}"
+            "   (le bon extrait était dans les 5 montrés)"
+        )
+        print(
+            f"   base « rang 1 »      : {repondables['rang1_juste']} / {repondables['essais']}"
+            "   (prendre le premier extrait, SANS modèle : le modèle doit battre ceci)"
+        )
+        print(
+            f"   dont abstentions     : {repondables['abstentions']}"
+            "   (le modèle renonce sur une question répondable : c'est une perte)"
+        )
+        print(
+            f"Sélection (hors corpus) : {hors_corpus['abstentions']} / {hors_corpus['essais']}"
+            "   abstentions — attendu : toutes"
+        )
+        print(
+            f"   dont choix d'un extrait : {hors_corpus['choix']}"
+            "   (répondre là où il n'y a rien)"
+        )
+        print(
+            f"Choix ILLISIBLE        : {bilan_selection['illisibles']} / {total}"
+            "   (ni chiffre ni 0 : le protocole n'a pas été suivi)"
+        )
+        print(
+            f"Choix REPRODUCTIBLE    : {bilan_selection['questions_choix_stable']}"
+            f" / {bilan_selection['questions']} questions"
+            "   (même numéro à toutes les répétitions — à comparer au texte libre,"
+            " qui a produit deux fatwas opposées sur la même question)"
+        )
     print(
         f"Refus RECONNUS         : {refus} / {total}"
         "   (indice seulement — la reconnaissance par phrase s'est déjà trompée"
         " dans le sens rassurant)"
     )
-    print(
-        f"NON VÉRIFIABLES        : {len(non_verifiables)} / {total - refus}"
-        "   (affirmation sans citation, ou citation absente du contexte —"
-        " invention démontrée)"
-    )
+    if config.SELECTION_PASSAGE:
+        print(
+            "NON VÉRIFIABLES        : sans objet"
+            "   (le modèle ne rédige pas : le texte affiché est un extrait du corpus)"
+        )
+    else:
+        print(
+            f"NON VÉRIFIABLES        : {len(non_verifiables)} / {total - refus}"
+            "   (affirmation sans citation, ou citation absente du contexte —"
+            " invention démontrée)"
+        )
     print(SEPARATEUR)
     print(f"📄 Rapport enregistré : {chemin}")
     print("   Les contextes y sont conservés : un contrôle de fidélité peut être")

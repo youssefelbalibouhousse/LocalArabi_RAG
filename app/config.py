@@ -158,6 +158,75 @@ DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "-1"))
 # `HYBRID_ENABLED`. Un réglage qu'on ne peut pas comparer ne se démontre pas.
 CITATIONS_OBLIGATOIRES = _env_flag("CITATIONS_OBLIGATOIRES", False)
 
+# --- Sélection de passage (EXPÉRIMENTAL, désactivé par défaut) -------------
+#
+# POURQUOI. Quatre tentatives pour empêcher le modèle d'inventer ont échoué :
+# seuil de distance, mot absent du corpus, contrôle de fidélité, citation
+# obligatoire. Le mur est toujours le même, et il faut le nommer : **une
+# génération libre est invérifiable**, parce que le modèle écrit dans la langue du
+# corpus et que rien de lexical ne distingue ce qu'il a lu de ce qu'il sait.
+#
+# D'où le renversement : on ne VÉRIFIE plus ce que le modèle écrit, on l'empêche
+# d'écrire. Il choisit une étiquette parmi les passages récupérés, ou déclare
+# qu'aucun ne répond. Le texte montré à l'utilisateur est alors TOUJOURS un
+# passage du corpus, avec sa référence : l'invention devient impossible par
+# construction, au lieu d'être détectée après coup.
+#
+# Ce qui reste possible : choisir le mauvais passage. Mais cela, l'utilisateur le
+# voit en lisant le passage cité — qui est dans son livre.
+SELECTION_PASSAGE = _env_flag("SELECTION_PASSAGE", False)
+
+# Étiquettes des passages : "chiffres" (défaut) ou "lettres".
+#
+# ⚠️ MESURÉ sur 12 questions × 2 répétitions, base « prendre le premier extrait »
+# = 10/24 :
+#   chiffres → 12/24 puis 11/24 choix justes (3 puis 5 illisibles)
+#   lettres  →  8/24 choix justes (6 illisibles)
+# Les lettres ne sont PAS meilleures, et l'échantillon suggère pire — mais à 24
+# essais, l'écart n'est pas résolu : ce qui est certain, c'est que **l'alphabet
+# n'est pas la cause**. La cause est que la sortie reste du TEXTE LIBRE, et le
+# modèle y recopie ce qu'il voit :
+#   - avec des chiffres : « 370 », « 369 », « 1062 » (des numéros de LIGNE du
+#     corpus, qui en porte un en tête de CHAQUE ligne) et « 6 » pour 5 passages ;
+#   - avec des lettres : « أ », « د » — il a traduit « حرف المقطع » dans SON
+#     alphabet (أ، ب، ج، د) — et « 1062 » est resté.
+# Changer d'alphabet déplace donc l'ambiguïté au lieu de la supprimer. On garde
+# les chiffres, dont le dossier mesuré est le meilleur, et on contraint la SORTIE
+# (voir SELECTION_CHOIX).
+SELECTION_ETIQUETTES = os.getenv("SELECTION_ETIQUETTES", "chiffres").strip().lower()
+if SELECTION_ETIQUETTES not in {"lettres", "chiffres"}:
+    raise ValueError(
+        f"SELECTION_ETIQUETTES doit valoir 'lettres' ou 'chiffres', "
+        f"reçu : {SELECTION_ETIQUETTES!r}"
+    )
+
+# Forme de la réponse attendue du modèle : "json" (défaut) ou "texte".
+#
+# POURQUOI. Mesuré sur 12 questions × 2 répétitions (base « prendre le premier
+# extrait », sans modèle = 10/24 ; plafond de récupération = 20/24) :
+#
+#   | protocole         | choix justes | illisibles |
+#   |-------------------|--------------|------------|
+#   | chiffres, texte   | 12 puis 11   | 3 puis 5   |
+#   | lettres, texte    |      8       |     6      |
+#   | **JSON contraint**|   **15**     |   **0**    |
+#
+# L'illisibilité n'est pas « moins fréquente » avec "json" : elle devient
+# IMPOSSIBLE. Le schéma passé au client contraint la génération des tokens à un
+# entier entre 0 et le nombre de passages, donc un numéro de ligne recopié
+# (« 1062 ») ne PEUT plus sortir. Sur les 3 questions qui échouaient à chaque
+# essai en texte : « 6 » → {"passage": 2}, « 370 » → {"passage": 1},
+# « 1062 » → {"passage": 1} (et c'était la bonne page).
+#
+# ⚠️ Ce n'est pas non plus une garantie de JUSTESSE : « passage lu » ne veut pas
+# dire « bon passage ». Le plafond reste 20/24, et 5 essais sur 24 avaient le bon
+# extrait visible sans être choisi.
+SELECTION_CHOIX = os.getenv("SELECTION_CHOIX", "json").strip().lower()
+if SELECTION_CHOIX not in {"texte", "json"}:
+    raise ValueError(
+        f"SELECTION_CHOIX doit valoir 'texte' ou 'json', reçu : {SELECTION_CHOIX!r}"
+    )
+
 # --- Recherche hybride (lexicale + vectorielle) ---------------------------
 #
 # POURQUOI elle existe, mesuré le 29/09 sur les 59 questions du jeu d'or :
