@@ -77,11 +77,19 @@ def mesurer_question(collection, question, repetitions):
         if not docs:
             # Aucun extrait : l'API ne consulte pas le modèle (voir app/main.py).
             reponse = ""
-        elif config.SELECTION_PASSAGE:
-            # Chemin de SÉLECTION : le modèle choisit un numéro, il ne rédige pas.
+        elif config.ANSWER_MODE == "selection":
+            # Régime SÉLECTION : le modèle choisit une étiquette, il ne rédige pas.
             # Le texte rendu est un passage du corpus — l'invention est impossible
             # par construction, et le rang choisi dit si le choix est le bon.
             reponse, choix, brute = rag.repondre_par_selection(
+                question.question, docs, sources, question.lang
+            )
+        elif config.ANSWER_MODE == "refus_puis_selection":
+            # Régime REFUS PUIS SÉLECTION : la question ouverte décide s'il faut
+            # renoncer, la sélection ancre ensuite la réponse. Le texte du premier
+            # appel n'est jamais montré — d'où `generate` (un appel) et non
+            # `answer_question` (qui pourrait en coûter deux).
+            reponse, choix, brute = rag.repondre_par_refus_puis_selection(
                 question.question, docs, sources, question.lang
             )
         else:
@@ -99,9 +107,9 @@ def mesurer_question(collection, question, repetitions):
             # bornes » et « il a écrit de la prose » sont indiscernables.
             "selection_brute": brute,
             "refus": (
-                choix is None
-                if config.SELECTION_PASSAGE
-                else (bool(rag.est_un_refus(reponse, question.lang)) if reponse else True)
+                (choix is None or choix == 0)
+                if config.ANSWER_MODE != "texte"
+                else ((not reponse) or bool(rag.est_un_refus(reponse, question.lang)))
             ),
             # Les citations sont extraites et vérifiées ICI, et conservées dans le
             # rapport : c'est le seul verdict mécaniquement démontrable. Une
@@ -291,7 +299,7 @@ def mode_rapport(args):
     # le compteur ci-dessus mesurerait l'absence d'une chose qui n'est plus
     # demandée. On le neutralise au lieu d'afficher un chiffre trompeur.
     bilan_selection = (
-        _bilan_selection(questions, resultats) if config.SELECTION_PASSAGE else None
+        _bilan_selection(questions, resultats) if config.ANSWER_MODE != "texte" else None
     )
     rapport = {
         "label": label,
@@ -302,7 +310,7 @@ def mode_rapport(args):
             "repetitions": args.repetitions,
             "n_results_app": config.N_RESULTS,
             "hybride": config.HYBRID_ENABLED,
-            "selection_passage": config.SELECTION_PASSAGE,
+            "selection_passage": config.ANSWER_MODE,
             "selection_etiquettes": config.SELECTION_ETIQUETTES,
             "selection_choix": config.SELECTION_CHOIX,
             "citations_obligatoires": config.CITATIONS_OBLIGATOIRES,
@@ -311,7 +319,7 @@ def mode_rapport(args):
             "questions": len(resultats),
             "reponses": total,
             "refus_reconnus": refus,
-            "non_verifiables": len(non_verifiables) if not config.SELECTION_PASSAGE else None,
+            "non_verifiables": len(non_verifiables) if config.ANSWER_MODE == "texte" else None,
             "selection": bilan_selection,
         },
         "results": resultats,
@@ -368,7 +376,7 @@ def mode_rapport(args):
         "   (indice seulement — la reconnaissance par phrase s'est déjà trompée"
         " dans le sens rassurant)"
     )
-    if config.SELECTION_PASSAGE:
+    if config.ANSWER_MODE != "texte":
         print(
             "NON VÉRIFIABLES        : sans objet"
             "   (le modèle ne rédige pas : le texte affiché est un extrait du corpus)"

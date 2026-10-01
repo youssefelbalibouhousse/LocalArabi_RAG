@@ -20,13 +20,13 @@ from app.ratelimit import RateLimit
 def reglages_par_defaut(monkeypatch):
     """Force les drapeaux EXPERIMENTAUX a leur valeur par defaut.
 
-    `app/config.py` lit l'environnement A L'IMPORT : un `SELECTION_PASSAGE=true`
+    `app/config.py` lit l'environnement A L'IMPORT : un `ANSWER_MODE=selection`
     reste dans le shell changeait le sens de tests qui n'ont rien a voir avec la
     selection — trois tests d'API ont echoue ainsi, et **le resultat de la suite
     dependait du terminal qui la lancait**. Un test doit etre reproductible ;
     ceux qui veulent activer un drapeau le font explicitement avec monkeypatch.
     """
-    monkeypatch.setattr(config, "SELECTION_PASSAGE", False, raising=False)
+    monkeypatch.setattr(config, "ANSWER_MODE", "texte", raising=False)
     monkeypatch.setattr(config, "CITATIONS_OBLIGATOIRES", False, raising=False)
     monkeypatch.setattr(config, "SELECTION_ETIQUETTES", "chiffres", raising=False)
     monkeypatch.setattr(config, "SELECTION_CHOIX", "json", raising=False)

@@ -158,23 +158,57 @@ DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "-1"))
 # `HYBRID_ENABLED`. Un réglage qu'on ne peut pas comparer ne se démontre pas.
 CITATIONS_OBLIGATOIRES = _env_flag("CITATIONS_OBLIGATOIRES", False)
 
-# --- Sélection de passage (EXPÉRIMENTAL, désactivé par défaut) -------------
+# --- Régime de réponse (EXPÉRIMENTAL) -------------------------------------
 #
-# POURQUOI. Quatre tentatives pour empêcher le modèle d'inventer ont échoué :
-# seuil de distance, mot absent du corpus, contrôle de fidélité, citation
-# obligatoire. Le mur est toujours le même, et il faut le nommer : **une
-# génération libre est invérifiable**, parce que le modèle écrit dans la langue du
-# corpus et que rien de lexical ne distingue ce qu'il a lu de ce qu'il sait.
+# TROIS régimes, mutuellement exclusifs, nommés plutôt que décrits par des
+# booléens : avec deux drapeaux, la combinaison « les deux à true » n'aurait
+# aucun sens et il faudrait décider laquelle gagne.
 #
-# D'où le renversement : on ne VÉRIFIE plus ce que le modèle écrit, on l'empêche
-# d'écrire. Il choisit une étiquette parmi les passages récupérés, ou déclare
-# qu'aucun ne répond. Le texte montré à l'utilisateur est alors TOUJOURS un
-# passage du corpus, avec sa référence : l'invention devient impossible par
-# construction, au lieu d'être détectée après coup.
+#   "texte"                  production. Le modèle rédige sa réponse.
+#   "selection"              le modèle CHOISIT un passage, il ne rédige rien.
+#   "refus_puis_selection"   renoncement d'abord (question ouverte), ancrage
+#                            ensuite (sélection) — voir POURQUOI ci-dessous.
 #
-# Ce qui reste possible : choisir le mauvais passage. Mais cela, l'utilisateur le
-# voit en lisant le passage cité — qui est dans son livre.
-SELECTION_PASSAGE = _env_flag("SELECTION_PASSAGE", False)
+# POURQUOI ces régimes existent. Quatre tentatives pour empêcher le modèle
+# d'inventer ont échoué : seuil de distance, mot absent du corpus, contrôle de
+# fidélité, citation obligatoire. Le mur est toujours le même : **une génération
+# libre est invérifiable**, parce que le modèle écrit dans la langue du corpus et
+# que rien de lexical ne distingue ce qu'il a lu de ce qu'il sait.
+#
+# D'où le renversement de "selection" : on ne VÉRIFIE plus ce que le modèle écrit,
+# on l'empêche d'écrire. Le texte montré est alors TOUJOURS un passage du corpus,
+# avec sa référence — l'invention devient impossible par construction.
+#
+# ⚠️ MAIS "selection" A ÉTÉ MESURÉ ET NE SUFFIT PAS, sur les 24 questions sans
+# réponse dans le corpus (48 essais) : le modèle n'a renoncé que **4 fois sur 48**
+# (8 %). Il désigne un passage même quand aucun ne répond, et le système le
+# présente alors comme une réponse. L'invention de texte est supprimée, la
+# mauvaise réponse ne l'est pas.
+#
+# Ce qui a donné "refus_puis_selection", mesuré sur les MÊMES 24 questions × 2 :
+# le TEXTE LIBRE renonce **34 fois sur 48 (71 %)** — 80 % sur les questions
+# éloignées, 56 % sur les proches du domaine. Autrement dit : le modèle SAIT dire
+# « je ne sais pas » en question ouverte, et ne le dit presque jamais quand on lui
+# demande de choisir. Une question à choix multiple appelle une réponse ; une
+# question ouverte admet l'ignorance.
+#
+# "refus_puis_selection" prend donc chaque régime là où il est le meilleur : la
+# question ouverte décide s'il faut renoncer, la sélection ancre ensuite la réponse
+# dans un passage réel. ⚠️ Le coût tombe du bon côté — UN SEUL appel quand la
+# réponse est absente (l'utilisateur n'attend rien), DEUX quand elle est présente.
+#
+# ⚠️ Ce régime N'EST PAS PARFAIT : les 14 cas sur 48 où le texte libre ne renonce
+# pas sont du pire type (fatwas brèves, faits de la mémoire du modèle, et deux
+# réponses CONTRADICTOIRES à la même question). Il ne les rattrape pas — il montre
+# un passage hors sujet dans 29 % des cas au lieu de 92 %. Trois fois mieux, pas
+# parfait, et la décision de renoncer dépend d'un détecteur imparfait (voir
+# `rag.FORMULES_DE_REFUS`).
+ANSWER_MODE = os.getenv("ANSWER_MODE", "texte").strip().lower()
+if ANSWER_MODE not in {"texte", "selection", "refus_puis_selection"}:
+    raise ValueError(
+        "ANSWER_MODE doit valoir 'texte', 'selection' ou 'refus_puis_selection', "
+        f"reçu : {ANSWER_MODE!r}"
+    )
 
 # Étiquettes des passages : "chiffres" (défaut) ou "lettres".
 #

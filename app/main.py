@@ -227,28 +227,36 @@ def ask(
 
     context = "\n\n".join(docs)
 
-    # 2bis. SÉLECTION DE PASSAGE (expérimental, voir config.SELECTION_PASSAGE).
+    # 2bis. RÉGIMES EXPÉRIMENTAUX (voir config.ANSWER_MODE).
     #
-    # Le modèle ne rédige rien : il choisit un numéro parmi les extraits. Le texte
-    # rendu est donc TOUJOURS un passage du corpus, avec sa référence — l'invention
-    # devient impossible par construction, au lieu d'être détectée après coup.
+    # "selection"             : le modèle choisit un passage, il ne rédige rien.
+    # "refus_puis_selection"  : renoncement d'abord (question ouverte), ancrage
+    #                           ensuite (sélection).
     #
     # Mesuré avant de construire ceci : quatre vérifications de texte libre ont
     # échoué (seuil de distance, mot absent du corpus, contrôle de fidélité,
     # citation obligatoire). La raison est constante — le modèle écrit dans la
     # langue du corpus, et rien de lexical ne distingue ce qu'il a lu de ce qu'il
-    # sait. Ce qui reste possible ici est de choisir le mauvais passage, et
-    # l'utilisateur le voit en lisant le passage cité.
+    # sait.
     #
-    # ⚠️ MESURÉ : ce mécanisme N'EMPÊCHE PAS de désigner un passage qui ne répond
-    # pas. Sur 24 questions SANS réponse dans le corpus (48 essais), le modèle n'a
-    # renoncé que 4 fois : dans les 44 autres cas, il a désigné un passage, et
-    # aucun ne répondait. L'invention de TEXTE est supprimée ; la mauvaise réponse
-    # ne l'est pas — elle est seulement devenue VÉRIFIABLE, puisque le passage
-    # affiché est une vraie page du livre.
-    if config.SELECTION_PASSAGE:
-        texte, choix, _brute = rag.repondre_par_selection(question, docs, sources, language)
-        # ⚠️ `choix > 0`, et non une simple vérité : 0 est une ABSTENTION (le
+    # ⚠️ MESURÉ, sur les 24 questions SANS réponse dans le corpus (48 essais) :
+    #   texte libre seul ....... renonce 34 / 48  (71 %)
+    #   sélection seule ........ renonce  4 / 48  ( 8 %)
+    # La sélection supprime l'invention de TEXTE mais désigne un passage même
+    # quand aucun ne répond. `refus_puis_selection` prend donc la décision de
+    # renoncer au régime qui sait la prendre, et l'ancrage à celui qui l'impose.
+    # ⚠️ Le coût tombe du bon côté : UN SEUL appel quand la réponse est absente,
+    # DEUX quand elle est présente.
+    if config.ANSWER_MODE != "texte":
+        if config.ANSWER_MODE == "selection":
+            texte, choix, _brute = rag.repondre_par_selection(
+                question, docs, sources, language
+            )
+        else:
+            texte, choix, _brute = rag.repondre_par_refus_puis_selection(
+                question, docs, sources, language
+            )
+        # ⚠️ `choix > 0`, et non une simple vérité : 0 est un RENONCEMENT (le
         # modèle déclare qu'aucun passage ne répond) et None une LECTURE
         # IMPOSSIBLE. Les deux mènent au même `no_info`, mais les confondre a
         # déjà fait publier « 0 abstention sur 48 » là où il y en avait 4.

@@ -608,6 +608,53 @@ def repondre_par_selection(question, documents, sources, language="ar"):
     )
 
 
+def repondre_par_refus_puis_selection(question, documents, sources, language="ar"):
+    """Renonce d'abord (question ouverte), ancre ensuite (sélection).
+
+    Retourne ``(texte, rang_choisi, brute)`` avec la convention de
+    `repondre_par_selection` : ``0`` pour un renoncement, ``None`` pour une
+    lecture impossible.
+
+    ⚠️ POURQUOI DEUX RÉGIMES PLUTÔT QU'UN. Mesuré sur les 24 questions SANS
+    réponse dans le corpus (2 répétitions, 48 essais) :
+
+        texte libre seul ....... renonce 34 / 48  (71 %)
+        sélection seule ........ renonce  4 / 48  ( 8 %)
+
+    Le modèle SAIT dire « je ne sais pas » en question ouverte, et ne le dit
+    presque jamais quand on lui demande de choisir parmi des passages : une
+    question à choix multiple appelle une réponse, une question ouverte admet
+    l'ignorance. On prend donc chaque régime là où il est le meilleur — le
+    premier décide s'il faut renoncer, le second empêche l'invention de texte.
+
+    ⚠️ Le premier appel sert à DÉCIDER, pas à rédiger : son texte n'est JAMAIS
+    montré. C'est ce qui permet d'utiliser `generate` (un seul appel) au lieu
+    d'`answer_question`, dont la reprise de langue coûterait un second appel pour
+    un texte qu'on jette de toute façon.
+
+    ⚠️ Ce régime n'est PAS parfait, et sa faiblesse est connue : la décision
+    repose sur `est_un_refus`, un détecteur par formules qui manquait 7 refus sur
+    34 avant d'être étendu aux cas observés. Un refus manqué fait passer une
+    question sans réponse jusqu'à la sélection, qui montrera alors un passage hors
+    sujet. Mesuré : le texte libre ne renonce pas 14 fois sur 48, et dans ces cas
+    il produit des fatwas brèves et deux réponses CONTRADICTOIRES à la même
+    question. Ce régime les transforme en passages hors sujet — trois fois mieux
+    que 92 %, pas parfait.
+    """
+    if not documents:
+        return "", None, ""
+
+    # 1. Question OUVERTE : elle décide s'il y a de quoi répondre.
+    brouillon = generate(question, "\n\n".join(documents), language)
+    if est_un_refus(brouillon, language):
+        # Le brouillon est conservé comme sortie brute : c'est lui qui permettra
+        # de juger un renoncement, ou de constater un refus manqué.
+        return "", 0, brouillon
+
+    # 2. Le modèle n'a pas renoncé : on ANCRE la réponse dans un passage réel.
+    return repondre_par_selection(question, documents, sources, language)
+
+
 def generate_selection(question, contexte, language="ar", nombre_de_passages=0):
     """Envoie l'invite de sélection au fournisseur configuré.
 
@@ -683,22 +730,50 @@ Réponse en français :"""
 الإجابة بالعربية:"""
 
 
-# Les formules de refus que l'invite impose, par langue.
+# Les formules de refus, par langue.
 #
-# ⚠️ Sert à reconnaître un refus POUR NE PAS CITER DE SOURCE dessous. Ce n'est pas
-# une mesure du taux de refus : mesuré le 29/09, un détecteur de ce genre a compté
-# 5 refus sur 15 là où une lecture en trouve 12 — le modèle refuse aussi avec ses
-# propres mots (« لا يوجد سياق يتعلق… », « حسب الوثائق المرفقة لا يوجد جواب… »).
-# La liste est donc LARGE, et elle manquera encore des cas ; mais l'erreur inverse
-# — décorer un refus d'une citation — est pire, car elle fait croire à une source.
+# ⚠️ Sert à deux choses, et la seconde est plus exigeante que la première :
+#   1. NE PAS CITER DE SOURCE sous un refus (voir `est_un_refus`) ;
+#   2. DÉCIDER de renoncer dans le régime `refus_puis_selection`.
+# Pour (2), un refus manqué fait passer une question sans réponse jusqu'à la
+# sélection, qui montrera un passage hors sujet. L'erreur est donc coûteuse dans
+# les deux sens, et la liste a été étendue aux formules RÉELLEMENT observées.
+#
+# ⚠️ Ce n'est toujours PAS une mesure du taux de refus. Mesuré le 29/09, un
+# détecteur de ce genre comptait 5 refus sur 15 là où une lecture en trouve 12.
+# Et le 01/10, sur 48 essais hors corpus, il en manquait **7 sur 34 (21 %)**, tous
+# des reformulations légitimes. Les sept formes ci-dessous ont été relevées en
+# lisant les réponses RÉELLES (le fichier UTF-8, pas le terminal) :
+#
+#   لا توجد المعلومات اللازمة لرد السؤال.        (et non « لا توجد معلومات »)
+#   لا يوجد صلة للسؤال في السياق.
+#   لا أوجد الإجابة في السياق السابق.            (أوجد, pas أجد)
+#   لا يوجد سؤال صحيح يمكن الإجابة عليه…
+#   لا تجد الإجابة في السياق المذكور.
+#   لا يوجد معلومات في السياق المرفق عن…         (يوجد مع معلومات !)
+#   لا يوجد mention لذلك في النص.               (mélange arabe/latin)
+#
+# ⚠️ Deux de ces formes ont d'abord été écrites FAUX, parce que je les avais lues
+# sur la sortie d'un terminal Windows déformée par cp1252 : « أجد » au lieu de
+# « أوجد », et « توجد » au lieu de « يوجد ». **Ne jamais lire de l'arabe dans un
+# terminal cp1252** — passer par un fichier UTF-8.
+#
+# Et il en manquera encore d'autres. **Un taux de refus se lit, il ne se compte pas.**
 FORMULES_DE_REFUS = {
     "ar": (
         "لا توجد معلومات",
+        "لا توجد المعلومات",
+        "لا يوجد معلومات",
         "لا توجد الاجابه",
         "لا اوجد معلومات",
         "لا يوجد سياق",
         "لا يوجد جواب",
+        "لا يوجد صله",
+        "لا يوجد سوال صحيح",
+        "لا يوجد mention",
         "لا توجد في الوثايق",
+        "لا اوجد الاجابه",
+        "لا تجد الاجابه",
     ),
     "fr": (
         "pas assez d informations",
