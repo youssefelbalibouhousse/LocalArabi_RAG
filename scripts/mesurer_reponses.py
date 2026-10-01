@@ -52,8 +52,14 @@ RESULTS_DIR = BASE_DIR / "eval" / "results"
 # l'affichage d'un extrait fait planter la mesure APRÈS avoir payé les appels au
 # modèle — on perd la mesure entière pour un problème d'affichage. Le rapport est
 # de toute façon écrit en UTF-8 explicitement plus bas.
+#
+# ⚠️ `line_buffering=True` n'est pas un détail de confort : quand la sortie n'est
+# pas un terminal (redirection vers un fichier, `Out-File`, pipe), Python la
+# tamponne par BLOCS. Une mesure de 45 minutes n'écrit alors **rien** avant la
+# fin, et il est impossible de savoir où elle en est — constaté : un journal vide
+# après plusieurs minutes. Le harnais force donc la sortie ligne à ligne.
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 SEPARATEUR = "─" * 68
 
