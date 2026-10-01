@@ -114,6 +114,15 @@ def mesurer_question(collection, question, repetitions):
             # indiscernables — et en `refus_puis_selection`, un renoncement manqué
             # ne se distingue plus d'un modèle qui n'a pas renoncé.
             "brut_decision": brute,
+            # ⚠️ QUELLE étape a renoncé ? Les deux n'ont pas la même fiabilité :
+            # le premier appel renonce 71 % du temps, la sélection 8 %. Les
+            # confondre a déjà fait croire à un refus du modèle là où c'était la
+            # SÉLECTION qui avait rendu 0 (constaté sur `q060`).
+            "renonce_au_premier_appel": (
+                rag.est_un_refus(brute, question.lang)
+                if config.ANSWER_MODE == "refus_puis_selection"
+                else None
+            ),
             "refus": (
                 (choix is None or choix == 0)
                 if config.ANSWER_MODE != "texte"
