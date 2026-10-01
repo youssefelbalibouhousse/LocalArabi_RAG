@@ -996,6 +996,96 @@ def test_la_selection_sans_extrait_ne_rend_rien():
     assert brute == ""
 
 
+def test_refus_puis_selection_renonce_sans_appeler_la_selection(monkeypatch):
+    """Le premier appel suffit à renoncer : on ne paie pas le second.
+
+    C'est tout l'intérêt du régime — le coût tombe du bon côté. Une question sans
+    réponse coûte UN appel, une question avec réponse en coûte DEUX.
+    """
+    monkeypatch.setattr(rag, "generate", lambda q, c, lang="ar": "لا توجد معلومات في السياق.")
+
+    def interdit(*args, **kwargs):
+        raise AssertionError("la sélection ne doit PAS être appelée après un refus")
+
+    monkeypatch.setattr(rag, "generate_selection", interdit)
+
+    texte, choix, brute = rag.repondre_par_refus_puis_selection(
+        "سؤال", ["نص"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert texte == ""
+    assert choix == 0           # renoncement, et non échec de lecture
+    assert brute == "لا توجد معلومات في السياق."
+
+
+def test_refus_puis_selection_ancre_quand_le_modele_ne_renonce_pas(monkeypatch):
+    """Le texte libre ne sert qu'à DÉCIDER : son contenu n'est jamais montré.
+
+    Il ferait pourtant ici une réponse parfaitement plausible — c'est justement
+    pourquoi on ne l'affiche pas : rien ne garantit qu'elle vienne du corpus.
+    """
+    monkeypatch.setattr(
+        rag, "generate", lambda q, c, lang="ar": "يحرم استخدام مكبر الصوت في الأذان."
+    )
+    monkeypatch.setattr(rag, "generate_selection", lambda q, c, lang, n: '{"passage": 1}')
+
+    texte, choix, brute = rag.repondre_par_refus_puis_selection(
+        "سؤال", ["نص المقطع"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert choix == 1
+    assert "نص المقطع" in texte          # le passage du corpus, pas la phrase du modèle
+    assert "يحرم" not in texte
+    assert brute == '{"passage": 1}'
+
+
+def test_refus_puis_selection_sans_extrait_ne_rend_rien():
+    texte, choix, brute = rag.repondre_par_refus_puis_selection("سؤال", [], [])
+
+    assert texte == ""
+    assert choix is None
+    assert brute == ""
+
+
+@pytest.mark.parametrize(
+    "formule",
+    [
+        "لا توجد المعلومات اللازمة لرد السؤال.",
+        "لا يوجد صلة للسؤال في السياق.",
+        "لا أوجد الإجابة في السياق السابق.",
+        "لا تجد الإجابة في السياق المذكور.",
+        "لا يوجد معلومات في السياق المرفق عن حكم العمل في البنوك.",
+        "لا يوجد mention لذلك في النص.",
+    ],
+)
+def test_les_formules_de_refus_REELLEMENT_observees_sont_reconnues(formule):
+    """⚠️ Ces six-là avaient toutes échappé au détecteur, et il en manquait 7 sur 34.
+
+    Elles sont relevées sur des réponses réelles, lues dans un fichier UTF-8.
+
+    ⚠️ **Ne jamais lire de l'arabe dans un terminal Windows (cp1252).** Deux
+    formules ont d'abord été écrites FAUX pour cette raison : « أجد » au lieu de
+    « أوجد », et « توجد » au lieu de « يوجد ». Le détecteur ne les reconnaissait
+    donc toujours pas, et le test aurait validé une correction inopérante.
+    """
+    assert rag.est_un_refus(formule, "ar")
+
+
+@pytest.mark.parametrize(
+    "reponse",
+    [
+        "لا يجوز بيع الأسهم في البورصة.",     # une fatwa inventée, pas un refus
+        "لا.",                                  # une réponse d'un mot
+        "لا يباح.",
+        "حسب هذه المعلومات الجواب هو: لا بأس به.",  # contient « المعلومات », sans négation
+        "عام 1989.",
+    ],
+)
+def test_une_reponse_affirmee_n_est_PAS_un_refus(reponse):
+    """Faux positif = on refuse une réponse qui existe. C'est l'erreur coûteuse."""
+    assert not rag.est_un_refus(reponse, "ar")
+
+
 def test_le_schema_borne_l_entier_au_nombre_de_passages():
     """C'est ce qui rend un choix hors bornes IMPOSSIBLE à produire.
 

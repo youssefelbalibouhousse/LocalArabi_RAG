@@ -485,7 +485,10 @@ convient — au lieu de le laisser rédiger. Le texte montré à l'utilisateur e
 alors **toujours un passage du corpus**, avec sa référence : l'invention devient
 **impossible par construction** plutôt que détectée après coup.
 
-**C'est construit et mesuré** (`SELECTION_PASSAGE`, désactivé par défaut).
+**C'est construit et mesuré** (`ANSWER_MODE`, dont la valeur par défaut reste
+`texte` : le régime de production). Trois régimes sont nommés plutôt que décrits
+par des booléens, parce que deux drapeaux auraient une combinaison qui ne veut
+rien dire — `texte`, `selection`, `refus_puis_selection`.
 
 #### Ce que la construction a coûté à découvrir
 
