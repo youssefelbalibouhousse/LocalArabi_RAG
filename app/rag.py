@@ -4,7 +4,9 @@ Partagée entre l'API (app.main) et le script d'ingestion (scripts.build_kb),
 pour éviter toute duplication de configuration.
 """
 
+import json
 import logging
+import re
 from collections.abc import Mapping
 
 import chromadb
@@ -316,6 +318,291 @@ Réponse en français :"""
 الإجابة بالعربية:"""
 
 
+# Étiquettes des passages soumis au modèle. Des CHIFFRES par défaut.
+#
+# ⚠️ MESURÉ, et l'enseignement est l'inverse de l'intuition. Le corpus porte un
+# numéro de ligne en tête de CHAQUE ligne (« 369 - وأجمعوا… ») et des marqueurs de
+# note (« (1) ») : avec des étiquettes chiffrées, le modèle a répondu « 370 »,
+# « 369 », « 1062 » — des numéros de LIGNE — ou « 6 » pour cinq passages. Passer à
+# des LETTRES (zéro lettre latine sur 60 extraits examinés) n'a PAS suffi : le
+# modèle a rendu « أ » et « د », c'est-à-dire « حرف المقطع » traduit dans SON
+# alphabet (أ، ب، ج، د), et « 1062 » est resté. Sur 24 essais : 12 puis 11 choix
+# justes avec des chiffres, 8 avec des lettres (base « premier extrait » = 10).
+#
+# **Changer d'alphabet déplace l'ambiguïté, elle ne la supprime pas** : la cause
+# est que la sortie est du TEXTE LIBRE. On garde donc les chiffres et on contraint
+# la SORTIE (`config.SELECTION_CHOIX`).
+ETIQUETTES = "ABCDEFGH"
+
+
+def etiquettes_selection(nombre: int, lettres=None) -> list[str]:
+    """Les étiquettes des ``nombre`` passages.
+
+    ``lettres`` force le jeu d'étiquettes ; ``None`` suit
+    ``config.SELECTION_ETIQUETTES``. ⚠️ Ce paramètre doit être HONORÉ partout où
+    l'on construit une correspondance étiquette → rang : sinon `lire_choix`
+    chercherait « C » dans un jeu d'étiquettes chiffrées et ne lirait plus rien.
+    """
+    if lettres is None:
+        lettres = config.SELECTION_ETIQUETTES == "lettres"
+    if lettres:
+        return list(ETIQUETTES[:nombre])
+    return [str(rang) for rang in range(1, nombre + 1)]
+
+
+def schema_choix(nombre_de_passages: int) -> dict:
+    """Schéma JSON de la réponse : un entier entre 0 et le nombre de passages.
+
+    C'est ce qui rend un choix ILLISIBLE impossible plutôt que détecté. Un
+    numéro de ligne recopié (« 1062 ») ne peut pas être produit : la contrainte
+    porte sur la génération des tokens, pas sur une vérification après coup.
+    ``0`` reste permis, et c'est l'abstention.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "passage": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": nombre_de_passages,
+            }
+        },
+        "required": ["passage"],
+    }
+
+
+def numeroter_passages(documents, etiquettes=None, lettres=None):
+    """Étiquette les passages soumis au modèle : ``[A] …``, ``[B] …``
+
+    L'étiquetage est ce qui permet au modèle de RÉPONDRE PAR UNE ÉTIQUETTE au lieu
+    de rédiger : c'est le seul format dont la sortie se vérifie sans rien
+    comprendre au sens.
+
+    ``etiquettes`` impose la liste exacte ; ``lettres`` choisit le jeu d'étiquettes
+    sans avoir à le construire. Les deux sont transmis à
+    ``etiquettes_selection``, qui reste le seul endroit qui décide.
+    """
+    if etiquettes is None:
+        etiquettes = etiquettes_selection(len(documents), lettres)
+    return "\n\n".join(
+        f"[{etiquette}] {texte}"
+        for etiquette, texte in zip(etiquettes, documents, strict=True)
+    )
+
+
+def construire_invite_selection(question, contexte, language="ar", lettres=None, json_format=None):
+    """Invite qui demande de CHOISIR un passage, et non de rédiger.
+
+    La tâche est fermée — rendre une étiquette — ce qui laisse beaucoup moins de
+    liberté qu'une réponse libre. Un modèle de 8 milliards de paramètres sait mal
+    s'abstenir quand on lui demande de rédiger ; il s'abstient mieux quand on lui
+    demande de choisir entre des étiquettes.
+
+    ⚠️ La consigne « ne recopie rien du texte » n'est PAS décorative : sans elle,
+    le modèle rend un numéro de LIGNE du corpus (« 1062 ») au lieu d'un numéro de
+    passage, et la réponse est illisible.
+    """
+    if lettres is None:
+        lettres = config.SELECTION_ETIQUETTES == "lettres"
+    if json_format is None:
+        json_format = config.SELECTION_CHOIX == "json"
+    quoi = ("حرف المقطع" if lettres else "رقم المقطع") if language == "ar" else (
+        "la LETTRE" if lettres else "le numéro"
+    )
+
+    if json_format:
+        # La contrainte de sortie fait le travail ; l'invite ne fait que nommer
+        # la forme attendue. Sans elle, le modèle commente ou recopie.
+        if language == "fr":
+            return f"""Lis les passages étiquetés ci-dessous.
+
+Passages :
+{contexte}
+
+Question : {question}
+
+Réponds UNIQUEMENT par un objet JSON : {{"passage": N}}, où N est {quoi} du passage qui répond DIRECTEMENT à la question, ou 0 si aucun passage ne répond. Ne recopie rien du texte et n'ajoute aucun commentaire.
+
+JSON :"""
+        return f"""اقرأ المقاطع الموسومة أدناه.
+
+المقاطع:
+{contexte}
+
+السؤال: {question}
+
+أجب بصيغة JSON فقط: {{"passage": N}}
+حيث N هو {quoi} الذي يجيب عن السؤال إجابة مباشرة، أو 0 إذا لم يجب أي مقطع. لا تنسخ شيئًا من النص ولا تضف شرحًا.
+
+JSON:"""
+
+    if language == "fr":
+        return f"""Lis les passages étiquetés ci-dessous, puis réponds par une seule étiquette.
+
+Passages :
+{contexte}
+
+Question : {question}
+
+Écris {quoi} du passage qui répond DIRECTEMENT à la question. Écris cette étiquette seule, sans aucun autre mot, et ne recopie rien du texte. Si aucun passage ne répond à la question, écris : 0
+
+Étiquette :"""
+
+    return f"""اقرأ المقاطع الموسومة أدناه، ثم أجب بوسم واحد فقط.
+
+المقاطع:
+{contexte}
+
+السؤال: {question}
+
+اكتب {quoi} الذي يجيب عن السؤال إجابة مباشرة. اكتب الوسم وحده، دون أي كلمة أخرى، ولا تنسخ شيئًا من النص. وإذا لم يجب أي مقطع عن السؤال، اكتب: 0
+
+الوسم:"""
+
+
+def lire_choix(
+    reponse: str,
+    nombre_de_passages: int,
+    lettres=None,
+    json_format=None,
+) -> int | None:
+    """Le passage choisi par le modèle, ou ``None`` si la réponse est inutilisable.
+
+    Renvoie ``0`` quand le modèle déclare qu'aucun passage ne répond — ce qui
+    n'est PAS un échec de lecture, mais une réponse : c'est la bonne conduite sur
+    une question que le corpus ne peut pas trancher.
+
+    Renvoie ``None`` quand la réponse ne contient aucune étiquette exploitable, ou
+    quand elle sort des bornes. On ne DEVINE pas : un choix illisible vaut un
+    refus, et il doit être mesurable comme tel. Mesuré : « 6 » pour cinq passages
+    reste illisible — il n'y a pas de sixième passage, donc il n'y a pas de choix.
+
+    On lit le DERNIER jeton utile : un modèle qui commente avant de conclure écrit
+    sa conclusion à la fin. Un jeton PRÉCÉDÉ D'UN SIGNE n'en est pas un : « -2 »
+    ne vaut pas 2, il vaut illisible.
+    """
+    if lettres is None:
+        lettres = config.SELECTION_ETIQUETTES == "lettres"
+    if json_format is None:
+        json_format = config.SELECTION_CHOIX == "json"
+    texte = reponse or ""
+
+    if json_format:
+        # La contrainte de sortie garantit un objet bien formé, mais pas le
+        # contenu : un champ absent, un type inattendu ou un texte quelconque
+        # restent possibles avec un autre fournisseur. On vérifie donc quand
+        # même — « la contrainte devrait l'empêcher » n'est pas une preuve.
+        try:
+            donnees = json.loads(texte.strip())
+        except ValueError:
+            return None
+        if not isinstance(donnees, dict):
+            return None
+        valeur = donnees.get("passage")
+        if isinstance(valeur, bool) or not isinstance(valeur, int):
+            return None
+        return valeur if 0 <= valeur <= nombre_de_passages else None
+
+    if lettres:
+        # Avec des étiquettes-lettres, on ne lit QUE des lettres ISOLÉES (et « 0 »
+        # pour l'abstention) :
+        #  - un chiffre dans la réponse est un numéro de ligne du corpus recopié,
+        #    donc précisément ce qu'on ne veut pas interpréter ;
+        #  - une lettre COLLÉE à d'autres lettres est un mot (« aucun » contient
+        #    un « a »), pas une étiquette. Sans cette borne, « aucun » serait lu
+        #    comme le passage A — c'est-à-dire deviné.
+        jetons = re.findall(r"(?<![-\u2212])\d+|(?<![A-Za-z])[A-Za-z](?![A-Za-z])", texte)
+        correspondance = {
+            etiquette: rang
+            for rang, etiquette in enumerate(
+                etiquettes_selection(nombre_de_passages, lettres), start=1
+            )
+        }
+        for jeton in reversed(jetons):
+            if jeton == "0":
+                return 0
+            rang = correspondance.get(jeton.upper())
+            if rang is not None:
+                return rang
+        return None
+
+    nombres = re.findall(r"(?<![-\u2212])\d+", texte)
+    if not nombres:
+        return None
+    choix = int(nombres[-1])
+    return choix if 0 <= choix <= nombre_de_passages else None
+
+
+def format_passage_choisi(passage: str, source: Mapping, language="ar") -> str:
+    """Le texte montré à l'utilisateur : le passage, et sa référence.
+
+    Aucune phrase n'est rédigée par le modèle : c'est ce qui rend l'invention
+    impossible. L'introduction et la référence sont des gabarits fixes.
+    """
+    intro = (
+        "Passage qui répond à la question :"
+        if language == "fr"
+        else "المقطع الذي يجيب عن السؤال:"
+    )
+    return (
+        f"{intro}\n\n{passage.strip()}\n\n"
+        f"{format_sources([source], language)}"
+    )
+
+
+def repondre_par_selection(question, documents, sources, language="ar"):
+    """Répond en SÉLECTIONNANT un passage parmi ceux qui ont été récupérés.
+
+    Retourne ``(texte, rang_choisi, brute)`` où ``rang_choisi`` est le rang
+    1-indexé du passage retenu, ou ``None`` si le modèle déclare qu'aucun ne
+    répond (ou si sa réponse est illisible). Dans les deux cas, ce n'est pas une
+    invention : c'est une abstention, et le texte rendu le dit.
+
+    ⚠️ ``brute`` — la sortie NON interprétée du modèle — est retournée parce que
+    sans elle un choix illisible est INDÉMÉLABLE : le texte rendu est vide dans
+    tous les cas, qu'on ait affaire à un modèle muet, à un numéro hors bornes,
+    ou à trois paragraphes de prose. Mesuré : un modèle à qui l'on donne
+    **cinq** passages a répondu « 6 ». Une mesure qui ne conserve pas la sortie
+    brute ne peut pas le savoir, et rangera les trois causes dans le même
+    compteur.
+    """
+    if not documents:
+        return "", None, ""
+
+    contexte = numeroter_passages(documents)
+    brute = generate_selection(question, contexte, language, len(documents))
+    choix = lire_choix(brute, len(documents))
+
+    if not choix:
+        return "", None, brute
+
+    return (
+        format_passage_choisi(documents[choix - 1], sources[choix - 1], language),
+        choix,
+        brute,
+    )
+
+
+def generate_selection(question, contexte, language="ar", nombre_de_passages=0):
+    """Envoie l'invite de sélection au fournisseur configuré.
+
+    Séparée de `generate` parce que la tâche n'est pas la même : `generate`
+    rédige, celle-ci choisit une étiquette. Les garder distinctes permet de
+    mesurer l'une sans toucher à l'autre — et c'est ce qu'on veut savoir.
+
+    `nombre_de_passages` sert à construire le schéma de sortie : c'est lui qui
+    borne l'entier au nombre réel de passages, donc qui rend un choix hors bornes
+    impossible à produire.
+    """
+    prompt = construire_invite_selection(question, contexte, language)
+    schema = (
+        schema_choix(nombre_de_passages)
+        if config.SELECTION_CHOIX == "json"
+        else None
+    )
+    return _appeler_modele([{"role": "user", "content": prompt}], format=schema)
+
+
 def build_prompt(question, context, language="ar"):
     """Construit l'invite envoyée au modèle, dans la langue demandée.
 
@@ -475,6 +762,41 @@ def build_messages(question, context, language="ar", previous_answer=None):
     return messages
 
 
+def _appeler_modele(messages, format=None):
+    """Envoie une liste de messages au fournisseur configuré.
+
+    Point de passage UNIQUE : `generate` (rédaction), la réécriture de langue et
+    la sélection de passage (choix d'un numéro) partagent le même appel, donc le
+    même fournisseur et le même modèle. Une seconde copie de cet appel
+    finirait par diverger — et `LLM_PROVIDER` cesserait d'être respecté quelque
+    part sans que rien ne le signale.
+
+    `format` : schéma JSON qui CONTRAINT la sortie, ou ``None`` pour du texte
+    libre. La contrainte est appliquée pendant la génération des tokens : elle
+    rend une forme interdite impossible à produire, là où une consigne dans
+    l'invite ne fait que la déconseiller. Avec un fournisseur OpenAI, seul
+    ``json_object`` est demandé — le schéma n'est pas transporté, car tous les
+    serveurs compatibles ne le comprennent pas.
+    """
+    if config.LLM_PROVIDER == "openai":
+        kwargs = {}
+        if format is not None:
+            kwargs["response_format"] = {"type": "json_object"}
+        response = get_openai_client().chat.completions.create(
+            model=config.LLM_MODEL,
+            messages=messages,
+            **kwargs,
+        )
+        return response.choices[0].message.content or ""
+
+    response = get_ollama_client().chat(
+        model=config.LLM_MODEL,
+        messages=messages,
+        format=format,
+    )
+    return response["message"]["content"]
+
+
 def generate(question, context, language="ar", previous_answer=None):
     """Envoie l'invite au fournisseur configuré et retourne la réponse.
 
@@ -487,20 +809,7 @@ def generate(question, context, language="ar", previous_answer=None):
 
     `previous_answer` : réponse à faire réécrire (voir `build_repair_instruction`).
     """
-    messages = build_messages(question, context, language, previous_answer)
-
-    if config.LLM_PROVIDER == "openai":
-        response = get_openai_client().chat.completions.create(
-            model=config.LLM_MODEL,
-            messages=messages,
-        )
-        return response.choices[0].message.content or ""
-
-    response = get_ollama_client().chat(
-        model=config.LLM_MODEL,
-        messages=messages,
-    )
-    return response["message"]["content"]
+    return _appeler_modele(build_messages(question, context, language, previous_answer))
 
 
 def answer_question(question, context, language="ar"):

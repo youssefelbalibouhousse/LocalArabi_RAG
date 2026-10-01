@@ -227,6 +227,28 @@ def ask(
 
     context = "\n\n".join(docs)
 
+    # 2bis. SÉLECTION DE PASSAGE (expérimental, voir config.SELECTION_PASSAGE).
+    #
+    # Le modèle ne rédige rien : il choisit un numéro parmi les extraits. Le texte
+    # rendu est donc TOUJOURS un passage du corpus, avec sa référence — l'invention
+    # devient impossible par construction, au lieu d'être détectée après coup.
+    #
+    # Mesuré avant de construire ceci : quatre vérifications de texte libre ont
+    # échoué (seuil de distance, mot absent du corpus, contrôle de fidélité,
+    # citation obligatoire). La raison est constante — le modèle écrit dans la
+    # langue du corpus, et rien de lexical ne distingue ce qu'il a lu de ce qu'il
+    # sait. Ce qui reste possible ici est de choisir le mauvais passage, et
+    # l'utilisateur le voit en lisant le passage cité.
+    if config.SELECTION_PASSAGE:
+        texte, choix, _brute = rag.repondre_par_selection(question, docs, sources, language)
+        return {
+            "question": question,
+            "answer": texte if choix else no_info,
+            "sources": [sources[choix - 1]] if choix else [],
+            "context_used": docs,
+            "language": language,
+        }
+
     # 2. GENERATE — réponse basée uniquement sur le contexte, dans la langue demandée.
     # `answer_question` (et non `generate`) : elle vérifie en plus que la langue
     # RÉELLEMENT produite correspond à celle demandée, et demande une réécriture
