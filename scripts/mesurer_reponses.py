@@ -102,10 +102,12 @@ def mesurer_question(collection, question, repetitions):
             "context": docs,
             "sources": sources,
             "selection": choix,
-            # La sortie NON interprétée, conservée même quand elle est illisible :
-            # sans elle, « le modèle n'a rien écrit », « il a écrit un numéro hors
-            # bornes » et « il a écrit de la prose » sont indiscernables.
-            "selection_brute": brute,
+            # La sortie NON interprétée qui a DÉCIDÉ, conservée quel que soit le
+            # régime : sans elle, « le modèle n'a rien écrit », « il a écrit un
+            # numéro hors bornes » et « il a écrit de la prose » sont
+            # indiscernables — et en `refus_puis_selection`, un renoncement manqué
+            # ne se distingue plus d'un modèle qui n'a pas renoncé.
+            "brut_decision": brute,
             "refus": (
                 (choix is None or choix == 0)
                 if config.ANSWER_MODE != "texte"

@@ -1036,7 +1036,9 @@ def test_refus_puis_selection_ancre_quand_le_modele_ne_renonce_pas(monkeypatch):
     assert choix == 1
     assert "نص المقطع" in texte          # le passage du corpus, pas la phrase du modèle
     assert "يحرم" not in texte
-    assert brute == '{"passage": 1}'
+    # ⚠️ La sortie brute est le BROUILLON, pas le choix JSON : c'est lui qui porte
+    # la décision, et le perdre rendrait un renoncement manqué indiagnosticable.
+    assert brute == "يحرم استخدام مكبر الصوت في الأذان."
 
 
 def test_refus_puis_selection_sans_extrait_ne_rend_rien():

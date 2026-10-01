@@ -568,11 +568,44 @@ intraveineuse, et une recette de couscous.
 
 **Conclusion : le texte libre renonce 71 % du temps, la sélection 8 %.** Le premier
 sait dire « je ne sais pas », le second ne le dit pas — mais le premier invente du
-texte, et le second le rend impossible. C'est ce qui justifie la piste suivante :
-**combiner les deux**, la question ouverte décidant s'il faut renoncer, la sélection
-servant ensuite à *ancrer* la réponse dans un passage réel. Le coût tombe du bon
-côté — un seul appel sur une question sans réponse, deux sur une question où
-l'utilisateur attend vraiment quelque chose.
+texte, et le second le rend impossible.
+
+### `refus_puis_selection` : prendre chaque régime là où il est le meilleur
+
+Construit et mesuré. La question ouverte décide s'il faut renoncer ; la sélection
+ancre ensuite la réponse dans un passage réel.
+
+| régime, sur les 24 questions hors corpus × 2 | renonce |
+|---|---|
+| sélection seule | 4 / 48 — 8,3 % |
+| **`refus_puis_selection`** | **26 / 48 — 54,2 %** |
+| texte libre seul | 34 / 48 — 70,8 % |
+
+**Six fois et demie mieux que la sélection seule, et zéro choix illisible** (48/48).
+Le coût tombe du bon côté : un seul appel quand la réponse est absente, deux quand
+elle est présente. Le texte du premier appel n'est jamais montré — il sert à
+décider, et c'est ce qui permet d'utiliser `generate` (un appel) au lieu
+d'`answer_question`, dont la reprise de langue coûterait un appel de plus pour un
+texte qu'on jette.
+
+⚠️ **Mais 16 points sous la cible de 71 %, et je ne sais pas encore pourquoi.**
+L'écart entre 26 et 34 a deux causes possibles, et elles n'appellent pas la même
+correction :
+
+- le détecteur a **manqué** des refus (il en manquait 7 sur 34 avant d'être étendu) ;
+- ou le modèle a simplement **moins refusé** dans cette exécution — il est
+  stochastique, et 48 essais ne fixent pas un taux à 1,7 point près.
+
+⚠️ **Je ne peux pas trancher, et c'est un défaut de mon instrument, pas du modèle.**
+`repondre_par_refus_puis_selection` rendait la sortie brute de la **sélection** —
+donc celle du second appel — ce qui **écrasait le brouillon** du premier. Or c'est
+le brouillon qui porte la décision : un refus manqué ne se voit que dans son texte.
+Le régime rend donc maintenant le brouillon, et il est consigné sous `brut_decision`
+(et non `selection_brute`, qui ne décrivait plus son contenu).
+
+La règle vaut au-delà de ce cas : **c'est la sortie qui a DÉCIDÉ qu'il faut
+conserver, pas la dernière produite**. Le même trou avait déjà rendu les choix
+illisibles indiagnosticables, avant que la sortie brute ne soit conservée.
 
 #### Une affirmation retirée du gabarit
 
