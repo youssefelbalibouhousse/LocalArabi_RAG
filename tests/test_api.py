@@ -251,3 +251,70 @@ def test_ask_repond_sans_appeler_le_llm_si_aucun_document(client, auth_headers, 
     assert response.status_code == 200
     assert "pas assez d'informations" in response.json()["answer"]
     assert response.json()["sources"] == []
+
+
+def test_ask_ne_cite_pas_de_source_quand_le_modele_refuse(client, auth_headers, monkeypatch):
+    """Un refus ne doit pas être décoré d'une citation.
+
+    Les sources sont ajoutées dès que la récupération rend quelque chose — et sans
+    seuil de distance, elle rend toujours quelque chose. Sans cette exception, le
+    lecteur ne peut plus distinguer « ceci vient de la page citée » de « on a collé
+    une source sans rapport sous un refus ». Mesuré avant correction : 24 réponses
+    sur 24 portaient une citation, refus compris.
+    """
+    monkeypatch.setattr(rag, "get_collection", lambda: "collection-simulee")
+    monkeypatch.setattr(
+        rag,
+        "retrieve",
+        lambda collection, question, n_results=None: (
+            ["Un passage qui ne répond pas à la question."],
+            [{"source": "a.pdf", "page": 3, "line_start": 1, "line_end": 5}],
+        ),
+    )
+    monkeypatch.setattr(
+        rag,
+        "generate",
+        lambda question, context, language="ar": (
+            "Je ne peux pas répondre : aucune information sur ce sujet."
+        ),
+    )
+
+    response = client.get(
+        "/ask",
+        params={"question": "une question", "language": "fr"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    corps = response.json()
+    assert "a.pdf" not in corps["answer"]
+    assert "Sources" not in corps["answer"]
+    assert corps["sources"] == []
+
+
+def test_ask_cite_toujours_quand_le_modele_repond(client, auth_headers, monkeypatch):
+    """L'exception ne doit pas supprimer les citations des vraies réponses."""
+    monkeypatch.setattr(rag, "get_collection", lambda: "collection-simulee")
+    monkeypatch.setattr(
+        rag,
+        "retrieve",
+        lambda collection, question, n_results=None: (
+            ["Le texte de la source."],
+            [{"source": "a.pdf", "page": 3, "line_start": 1, "line_end": 5}],
+        ),
+    )
+    monkeypatch.setattr(
+        rag,
+        "generate",
+        lambda question, context, language="ar": "La réponse est quarante.",
+    )
+
+    response = client.get(
+        "/ask",
+        params={"question": "une question", "language": "fr"},
+        headers=auth_headers,
+    )
+
+    corps = response.json()
+    assert "a.pdf — page 3 (lignes 1-5)" in corps["answer"]
+    assert corps["sources"][0]["page"] == 3

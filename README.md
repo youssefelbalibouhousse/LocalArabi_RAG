@@ -16,6 +16,7 @@ app/
 ├── ingest.py        # Ingestion incrémentale et bornée (registre, lots)
 ├── epub.py          # Extraction des EPUB (corpus Shamela)
 ├── evaluation.py    # Mesure de la qualité de la récupération (hit@k, MRR)
+├── fidelite.py      # Contrôle qu'une réponse est ancrée dans le contexte
 ├── language.py      # Détection arabe/français (respect de la langue)
 ├── auth.py          # JWT + hachage des mots de passe
 ├── ratelimit.py     # Limitation de débit (fenêtre glissante)
@@ -29,6 +30,7 @@ scripts/
 ├── build_kb.py              # Ingestion des documents (PDF, EPUB) → base vectorielle
 ├── benchmark_embeddings.py  # Débit de l'endpoint d'embeddings, avant de payer
 ├── eval_rag.py              # Évaluation de la récupération (jeu d'or, mesures)
+├── mesurer_reponses.py      # Mesure des RÉPONSES, avec répétitions
 ├── backup.py                # Sauvegarde + vérification + restauration
 ├── schedule_backup.py       # Sauvegarde quotidienne automatique
 └── create_user.py           # Création d'un compte en ligne de commande
@@ -338,52 +340,139 @@ elle serait comptée réussie quel que soit son résultat.
 Les deux populations ne se mesurent pas de la même façon, et le rapport les
 sépare. Une question hors corpus **n'a pas de rang** : la récupération rend
 toujours *k* chunks, même hors sujet. Ce qui se mesure, c'est la **distance du
-chunk le plus proche** — et c'est elle qui dit si le seuil de distance de
-l'application est réglable :
+chunk le plus proche** :
 
 | | min | médiane | max |
 |---|---|---|---|
 | 59 questions répondables | 0,26 | 0,38 | **0,52** |
-| 15 questions hors corpus | **0,54** | 0,61 | 0,67 |
+| 24 questions hors corpus | **0,41** | 0,58 | 0,67 |
 
-**Les deux populations ne se recouvrent pas** sur cette mesure — le seuil
-(`DISTANCE_THRESHOLD`, aujourd'hui désactivé) serait donc calibrable autour de
-0,53. ⚠️ Mais la marge est de **0,02**, et elle repose sur deux extrêmes, les
-statistiques les moins stables qui soient : 74 questions ne suffisent pas à
-adopter ce seuil. À vérifier sur un jeu hors corpus plus large avant d'y toucher.
+### ⚠️ La distance ne sépare PAS « hors sujet » de « réponse absente »
 
-### Le refus ne se mesure pas par une phrase
+Une première série de 15 questions hors corpus donnait des distances **toutes
+supérieures** à 0,53, et une population répondable plafonnant à 0,52 : les deux
+semblaient séparées, et le seuil `DISTANCE_THRESHOLD` calibrable. **C'était une
+illusion due à des questions trop faciles** — astronomie, cuisine, football, très
+loin du sujet.
 
-Les 15 questions hors corpus ont été passées dans le chemin de production réel
-(récupération → génération → assemblage). Résultat lu et classé à la main :
+Les 9 questions ajoutées ensuite sont du **même domaine** que le corpus : elles
+portent sur des réalités modernes (avion, assurance, monnaie électronique, don
+d'organes) que ces ouvrages ne peuvent pas trancher, mais leur vocabulaire est
+celui du corpus. Leur distance tombe **en plein milieu** des questions
+répondables :
 
-| | nombre |
+| question (réponse absente du corpus) | distance |
 |---|---|
-| refus corrects | **12 / 15** |
-| **fabrications** | **3 / 15** |
+| الصلاة في الطائرة | 0,414 |
+| التبرع بالأعضاء | 0,422 |
+| حقنة في الوريد | 0,425 |
+| بيع الأسهم في البورصة | 0,481 |
+| العمل في البنوك | 0,491 |
+| التأمين على السيارات | 0,513 |
 
-Les trois fabrications sont du pire type : à « en quelle année est tombé le mur
-de Berlin ? » le système répond « **1989** », et à « qui a gagné la Coupe du monde
-1998 ? » il répond « **la France** » — deux faits exacts, tirés de la mémoire du
-modèle et non du corpus, puis décorés d'une citation vers une page qui parle d'un
-sultan ottoman.
+**Conclusion : la distance mesure la proximité de SUJET, pas la présence d'une
+RÉPONSE.** Aucun seuil ne les distingue — le rapport le dit désormais lui-même
+(« les deux populations SE RECOUVRENT »). Un seuil assez haut pour laisser passer
+ces questions ne protège de rien ; un seuil assez bas pour les écarter
+supprimerait 10 vraies réponses sur 59.
 
-> ⚠️ **Un détecteur automatique de refus s'est trompé, et c'est le résultat le
-> plus utile de cette mesure.** En cherchant la phrase exacte du prompt, il
-> comptait **5 refus sur 15** là où il y en a 12 : il manquait les reformulations
-> arabes (« لا توجد الإجابة في السياق المستخرج ») et butait sur une apostrophe
-> en français. **Un taux de refus mesuré par correspondance de phrase est faux**,
-> et il l'est dans le sens rassurant — il fait croire au pire. Cette mesure
-> demande un juge, ou une lecture.
+C'est la population qui compte pour un pilote : la question a l'air normale, et
+c'est précisément là que le système invente le plus.
 
-⚠️ **Structurel, et indépendant du modèle** : les sources sont ajoutées à la
-réponse **dès que la récupération a rendu quelque chose** (`app/main.py`). Comme
-`DISTANCE_THRESHOLD` est désactivé, elle rend toujours quelque chose : **15
-réponses sur 15 portaient une citation**, refus compris. L'utilisateur ne peut
-donc pas distinguer « ceci vient de la page citée » de « le système a refusé et on
-a collé des sources sans rapport dessous ». C'est le point à corriger en priorité
-pour un pilote — et la séparation des distances ci-dessus montre qu'on a de quoi
-le faire.
+### Ce que le système fait vraiment : c'est une DISTRIBUTION, pas un verdict
+
+⚠️ **La même question reçoit des réponses contradictoires.** Mesuré sur les 9
+questions proches du domaine, deux exécutions chacune
+(`scripts/mesurer_reponses.py --repetitions 2`) :
+
+| question | exécution #1 | exécution #2 |
+|---|---|---|
+| ما حكم استخدام مكبر الصوت في الأذان؟ | « لا بأس به. » | « **يحرم** استخدام مكبر الصوت في الأذان. » |
+| هل يفطر الصائم بأخذ حقنة في الوريد؟ | « لا. » | « لا. » |
+| ما حكم التبرع بالأعضاء بعد الوفاة؟ | *refus* | « حكمًا شرعيًا يعتمد على الاختصاصات القانونية في الدولة » |
+| ما حكم صلاة الجمعة عن بعد في زمن الوباء؟ | « ليس على المسافر… » | « الجمعة جائزة خلف كل إمام… » |
+| q075, q076, q077, q078, q083 | *refus* | *refus* |
+
+**Deux fatwas opposées à une minute d'intervalle, sur la même question** — et aucune
+des deux n'est dans le corpus. Deux réponses contradictoires ne peuvent pas venir
+du même texte : c'est la démonstration la plus directe que quelque chose est
+inventé, et elle ne demande aucun juge.
+
+⚠️ **Conséquence de méthode** : les comptes publiés plus haut (12 refus sur 15, puis
+4 sur 9) sont **un échantillon chacun**, pas une propriété. Une comparaison
+d'invites faite sur une seule exécution de chaque côté n'est pas interprétable —
+c'est pourquoi `scripts/mesurer_reponses.py` répète chaque question.
+
+### Trois vérifications déterministes essayées, trois échecs
+
+Toutes visaient le même but : empêcher qu'une réponse soit inventée, sans juge et
+sans rappeler le modèle.
+
+**1. Le seuil de distance** — échec, mesuré plus haut : les questions proches du
+domaine ont une distance dans la plage des questions répondables.
+
+**2. « La question emploie un mot que le corpus n'a jamais »** — attrape **20/20**
+des questions hors corpus, mais refuse à tort **11 questions répondables sur 57**.
+Les onze sont de la **morphologie** : `بماذا`, `الراجل`, `افترق`, `كرهها`,
+`بنجومه` (bـ + نجوم + ـه), `زواج` là où le corpus écrit `نكاح`, `جواز`, `مخلوقه`.
+Le mot est absent comme *chaîne*, sa racine est partout. Le critère est faux, et
+il l'est systématiquement.
+
+**3. Le contrôle de fidélité après génération** (`app/fidelite.py`, module pur) —
+cherche dans le contexte les éléments de la réponse. Appliqué aux 7 réponses
+réelles qui ne sont pas des refus : **0 attrapée par les nombres**, 3 par les mots,
+et **3 inchécables** parce qu'elles font un à trois mots (« لا. », « لا بأس به. »).
+
+| réponse | nombres absents | mots absents du contexte |
+|---|---|---|
+| « لا. » | — | aucun (rien à vérifier) |
+| « لا بأس به. » | — | aucun (rien à vérifier) |
+| « الجمعة جائزة خلف كل إمام… » | — | aucun |
+| « حكمًا شرعيًا يعتمد على الاختصاصات القانونية » | — | 14 |
+
+**La raison de ces trois échecs est la même** : les inventions du modèle sont faites
+du **vocabulaire du corpus**. Il en connaît la langue, le style et les tournures.
+Ce qui distingue une citation d'une invention n'est pas lexical, c'est **sémantique**
+— et aucune vérification de mots ne peut le voir.
+
+### La piste qui reste : rendre la réponse vérifiable par construction
+
+Puisqu'aucun contrôle *a posteriori* ne fonctionne sur du texte libre, il reste à
+changer ce qu'on demande au modèle : **une citation verbatim du contexte à l'appui
+de chaque affirmation**. Le contrôle devient alors exact — la citation est dans le
+contexte, ou elle n'y est pas — et le modèle ne peut pas tricher : inventer une
+citation la fait échouer au contrôle, et ne pas en fournir le force au refus.
+
+C'est le seul mécanisme où la vérification n'a pas besoin de comprendre le sens.
+Il reste à le tester avec `scripts/mesurer_reponses.py --repetitions`, et à
+mesurer son coût : un modèle qui ne se conforme pas produirait des refus à tort.
+
+> Le projet le disait depuis le début, pour la qualité des réponses : « mesurer si
+> la réponse est bonne demande un juge ». Les trois échecs ci-dessus ne font que
+> le confirmer sur ce corpus — et ajoutent une raison de plus de rendre la réponse
+> **vérifiable** plutôt que de chercher à la juger automatiquement.
+
+### Ce qui a été corrigé : plus de citation sous un refus
+
+Les sources étaient ajoutées **dès que la récupération rendait quelque chose**
+(`app/main.py`) — et sans seuil de distance, elle rend toujours quelque chose :
+**24 réponses sur 24 portaient une citation, refus compris**. Le lecteur ne pouvait
+donc pas distinguer « ceci vient de la page citée » de « on a collé une source sans
+rapport sous un refus ».
+
+`rag.est_un_refus()` reconnaît les formules de refus **réellement observées** et
+supprime alors la citation — de la réponse comme du champ `sources` de l'API.
+
+⚠️ Ce garde-fou **n'empêche pas d'inventer** : il enlève une citation trompeuse.
+
+### Une invite durcie a été essayée, puis retirée
+
+Quatre règles numérotées ont été ajoutées, interdisant explicitement d'inférer, de
+faire des analogies et d'attribuer des opinions absentes. Elle donnait 1 refus sur
+9 là où l'invite précédente en donnait 4 — mais **ces deux mesures étaient des
+échantillons uniques** d'un processus très variable (voir les fatwas opposées
+ci-dessus). L'expérience est donc consignée dans `app/rag.py` **sans conclusion
+tranchée** : elle devra être refaite avec des répétitions.
 
 ## Recherche hybride (lexicale + vectorielle)
 

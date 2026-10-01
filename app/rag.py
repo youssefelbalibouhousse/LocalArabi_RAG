@@ -15,7 +15,7 @@ from chromadb.utils.embedding_functions.ollama_embedding_function import (
 
 from app import config
 from app.language import detect_language
-from app.lexical import IndexLexical, fusionner_rrf
+from app.lexical import IndexLexical, fusionner_rrf, normaliser
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +285,21 @@ def build_prompt(question, context, language="ar"):
 
     On précise aussi explicitement que les extraits sont en arabe : sans cela,
     le modèle imite la langue du contexte, ce qui paraît naturel.
+
+    ⚠️ MESURÉ, PUIS REVENU EN ARRIÈRE (29/09). Une version DURCIE de cette invite a
+    été essayée : quatre règles numérotées interdisant explicitement d'inférer, de
+    faire des analogies et d'attribuer des opinions absentes du texte. Résultat
+    mesuré sur les 9 questions proches du domaine et sans réponse dans le corpus :
+    **1 refus sur 9, contre 4 sur 9 avant**. Et la FORME des réponses a changé :
+    elles sont devenues des fatwas courtes et assertives (« لا يجوز بيع الأسهم في
+    البورصة. », « لا بأس بأن يعمل في البنوك. »), là où l'ancienne invite faisait
+    au moins citer le corpus. **Ajouter des interdictions a rendu le modèle plus
+    assertif, pas plus fidèle.**
+
+    Réserve honnête : une exécution de chaque côté, et le modèle est stochastique.
+    Le changement de forme, lui, est net sur 6 questions sur 9. Avant de retenter un
+    durcissement, mesurer PLUSIEURS exécutions par question — c'est le seul
+    protocole qui puisse trancher.
     """
     if language == "fr":
         return f"""Utilise uniquement le contexte ci-dessous pour répondre précisément à la question. Si le contexte ne contient pas la réponse, dis : « Désolé, il n'y a pas assez d'informations dans les documents fournis. ».
@@ -308,6 +323,74 @@ Réponse en français :"""
 تنبيه إلزامي: يجب أن تكتب إجابتك باللغة العربية فقط، ولا تكتب أي جملة بلغة أخرى.
 
 الإجابة بالعربية:"""
+
+
+# Les formules de refus que l'invite impose, par langue.
+#
+# ⚠️ Sert à reconnaître un refus POUR NE PAS CITER DE SOURCE dessous. Ce n'est pas
+# une mesure du taux de refus : mesuré le 29/09, un détecteur de ce genre a compté
+# 5 refus sur 15 là où une lecture en trouve 12 — le modèle refuse aussi avec ses
+# propres mots (« لا يوجد سياق يتعلق… », « حسب الوثائق المرفقة لا يوجد جواب… »).
+# La liste est donc LARGE, et elle manquera encore des cas ; mais l'erreur inverse
+# — décorer un refus d'une citation — est pire, car elle fait croire à une source.
+FORMULES_DE_REFUS = {
+    "ar": (
+        "لا توجد معلومات",
+        "لا توجد الاجابه",
+        "لا اوجد معلومات",
+        "لا يوجد سياق",
+        "لا يوجد جواب",
+        "لا توجد في الوثايق",
+    ),
+    "fr": (
+        "pas assez d informations",
+        "aucune information",
+        "ne contiennent pas",
+        "ne mentionnent pas",
+        "ne permet pas de repondre",
+    ),
+}
+
+
+def est_un_refus(reponse: str, language: str = "ar") -> bool:
+    """La réponse déclare-t-elle qu'elle n'a pas de quoi répondre ?
+
+    Sert à NE PAS ajouter de citation sous un refus. Les sources sont ajoutées
+    dès que la récupération rend quelque chose, et sans seuil de distance elle
+    rend toujours quelque chose : sans ce test, une réponse « je n'ai pas
+    l'information » se retrouve décorée d'une page sans rapport, et rien ne
+    distingue plus « ceci vient de la page citée » de « on a collé une source
+    sous un refus ». C'est la promesse du produit qui est en jeu : toute
+    affirmation doit être vérifiable dans le texte cité.
+
+    ⚠️ Reconnaissance par formules, donc imparfaite par construction : elle peut
+    manquer un refus formulé autrement. Elle ne doit JAMAIS servir à mesurer un
+    taux de refus (voir `FORMULES_DE_REFUS`), seulement à éviter une citation
+    trompeuse.
+    """
+    normalisee = _normaliser_pour_refus(reponse)
+    return any(
+        _normaliser_pour_refus(formule) in normalisee
+        for formule in FORMULES_DE_REFUS.get(language, FORMULES_DE_REFUS["ar"])
+    )
+
+
+def _normaliser_pour_refus(texte: str) -> str:
+    """Forme comparable d'un texte, pour chercher une formule de refus.
+
+    ⚠️ La normalisation ARABE est indispensable, et son absence a fait échouer deux
+    tests dès l'écriture : « الإجابة » et « اجابه » sont le même mot, mais aucune
+    des deux chaînes ne contient l'autre. C'est la même faute que la plage de
+    caractères qui avalait la ponctuation : une comparaison de texte brut sur de
+    l'arabe est fausse par accident, et silencieusement.
+
+    Les apostrophes françaises sont retirées pour la même raison : « d'informations »
+    ne contient pas la sous-chaîne « d informations ».
+    """
+    texte = normaliser(texte)
+    for signe in ("'", "’", "`", "،", "؛"):
+        texte = texte.replace(signe, " ")
+    return " ".join(texte.split())
 
 
 def build_repair_instruction(language):
