@@ -538,11 +538,19 @@ def format_passage_choisi(passage: str, source: Mapping, language="ar") -> str:
 
     Aucune phrase n'est rédigée par le modèle : c'est ce qui rend l'invention
     impossible. L'introduction et la référence sont des gabarits fixes.
+
+    ⚠️ L'introduction dit que le passage a été SÉLECTIONNÉ, et rien de plus. Elle
+    disait « المقطع الذي يجيب عن السؤال » — « le passage qui répond à la
+    question » — c'est-à-dire une affirmation que le système n'est PAS en mesure
+    de tenir : mesuré, sur 48 essais de questions SANS réponse dans le corpus, le
+    modèle n'a renoncé que 4 fois. Dans les 44 autres cas, le titre aurait
+    affirmé une chose fausse. Le système sait quel passage il a choisi ; il ne
+    sait pas si ce passage répond. Il ne doit donc l'affirmer dans aucun cas.
     """
     intro = (
-        "Passage qui répond à la question :"
+        "Passage sélectionné dans l'ouvrage (à vérifier) :"
         if language == "fr"
-        else "المقطع الذي يجيب عن السؤال:"
+        else "المقطع المختار من الكتاب (يُرجى التحقّق منه):"
     )
     return (
         f"{intro}\n\n{passage.strip()}\n\n"
@@ -553,18 +561,29 @@ def format_passage_choisi(passage: str, source: Mapping, language="ar") -> str:
 def repondre_par_selection(question, documents, sources, language="ar"):
     """Répond en SÉLECTIONNANT un passage parmi ceux qui ont été récupérés.
 
-    Retourne ``(texte, rang_choisi, brute)`` où ``rang_choisi`` est le rang
-    1-indexé du passage retenu, ou ``None`` si le modèle déclare qu'aucun ne
-    répond (ou si sa réponse est illisible). Dans les deux cas, ce n'est pas une
-    invention : c'est une abstention, et le texte rendu le dit.
+    Retourne ``(texte, rang_choisi, brute)`` :
+
+    - ``rang_choisi`` vaut ``0`` quand le modèle déclare qu'aucun passage ne
+      répond. C'est une RÉPONSE, pas un échec : c'est la bonne conduite sur une
+      question que le corpus ne peut pas trancher. Le texte rendu est vide.
+    - ``rang_choisi`` vaut ``None`` quand la réponse est illisible (hors
+      protocole, ou rang hors bornes). Le texte rendu est vide AUSSI — mais les
+      deux causes ne se confondent pas, et l'appelant doit pouvoir les compter
+      séparément.
+
+    ⚠️ **``0`` et ``None`` ne doivent JAMAIS être confondus.** Ce code a écrit
+    ``if not choix:`` : ``0`` étant falsy, l'abstention était rendue comme un
+    échec de lecture. Le rapport annonçait donc « 0 abstention sur 48 » là où il y
+    en avait 4 — l'erreur allait dans le sens le plus défavorable au mécanisme,
+    et elle était invisible à la lecture du chiffre. C'est le même piège que
+    ``all([])`` dans ``evaluation.est_orpheline`` : une valeur falsy qui fait
+    disparaître un cas.
 
     ⚠️ ``brute`` — la sortie NON interprétée du modèle — est retournée parce que
     sans elle un choix illisible est INDÉMÉLABLE : le texte rendu est vide dans
     tous les cas, qu'on ait affaire à un modèle muet, à un numéro hors bornes,
-    ou à trois paragraphes de prose. Mesuré : un modèle à qui l'on donne
-    **cinq** passages a répondu « 6 ». Une mesure qui ne conserve pas la sortie
-    brute ne peut pas le savoir, et rangera les trois causes dans le même
-    compteur.
+    ou à trois paragraphes de prose. C'est ce qui a permis de découvrir que les
+    ``{"passage": 0}`` comptés comme illisibles étaient des abstentions.
     """
     if not documents:
         return "", None, ""
@@ -573,8 +592,14 @@ def repondre_par_selection(question, documents, sources, language="ar"):
     brute = generate_selection(question, contexte, language, len(documents))
     choix = lire_choix(brute, len(documents))
 
-    if not choix:
+    # ⚠️ ``is None``, et non ``not choix`` : ``0`` est une abstention, c'est-à-dire
+    # une réponse. Le confondre avec un échec de lecture a fait publier
+    # « 0 abstention sur 48 » là où il y en avait 4.
+    if choix is None:
         return "", None, brute
+
+    if choix == 0:
+        return "", 0, brute
 
     return (
         format_passage_choisi(documents[choix - 1], sources[choix - 1], language),
