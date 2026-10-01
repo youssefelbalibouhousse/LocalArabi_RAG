@@ -1088,6 +1088,57 @@ def test_une_reponse_affirmee_n_est_PAS_un_refus(reponse):
     assert not rag.est_un_refus(reponse, "ar")
 
 
+@pytest.mark.parametrize(
+    "formule",
+    [
+        # ⚠️ La règle à deux signaux : une négation de disponibilité ET une
+        # référence à la source, souvent SÉPARÉES par d'autres mots.
+        # Ces six-là laissaient passer un passage malgré un refus du modèle,
+        # ce qui faisait tomber le renoncement du régime de 33/48 à 27/48.
+        "لا يوجد شيء يتعلق بذلك في السياق السابق.",
+        "لا أوجد المعلومات في السياق المذكور لتوضيح ذلك.",
+        "لا يوجد في السياق المستخرج معلومات عن رمز كيميائي للذهب.",
+        "لا توجد جوابًا للأسئلة المطروحة في السياق. لم ينص على الحكم في السياق المقدم.",
+        "لا يوجد أي توجيهات واضحة في السياق حول حكم العمل في البنوك.",
+        "لا أعلم أي شيء يُسمى \"أستراليا\" في السياق المحدد.",
+        # Refus complet en deux mots : aucune seconde source à exiger, donc
+        # invisible pour la règle à deux signaux. Il a laissé passer un passage.
+        "لا جواب.",
+    ],
+)
+def test_un_refus_est_reconnu_meme_quand_les_signaux_sont_eloignes(formule):
+    """⚠️ Aucune liste de phrases exactes ne peut couvrir ces formes.
+
+    Les six premières ont un point commun — une négation de disponibilité ET une
+    référence à la source — mais séparées par d'autres mots. Le détecteur par
+    formules en manquait 6 sur 33 (18 %), et ces six-là ne se voyaient qu'en
+    LISANT les brouillons. La septième est l'inverse : un refus si court qu'il
+    n'a pas de second signal. D'où les deux mécanismes, l'un ne remplaçant pas
+    l'autre.
+    """
+    assert rag.est_un_refus(formule, "ar")
+
+
+@pytest.mark.parametrize(
+    "reponse",
+    [
+        # ⚠️ Une négation NE SUFFIT PAS : ce sont des fatwas, pas des refus.
+        "لا يجوز ذلك.",
+        "لا يجوز بيع الأسهم لأنها من البيوع الغرر.",
+        "لا بأس بذلك.",
+        "لا.",
+        # ⚠️ Une référence à la source NE SUFFIT PAS non plus :
+        # « selon le contexte, la réponse est : Au » cite le contexte pour
+        # affirmer, pas pour renoncer.
+        "حسب السياق أدناه، الإجابة هي: Au.",
+        "حسب هذه المعلومات الجواب هو: لا بأس به.",
+    ],
+)
+def test_un_seul_signal_ne_suffit_pas_a_conclure_au_refus(reponse):
+    """Faux positif = on refuse une réponse qui existe. C'est l'erreur coûteuse."""
+    assert not rag.est_un_refus(reponse, "ar")
+
+
 def test_le_schema_borne_l_entier_au_nombre_de_passages():
     """C'est ce qui rend un choix hors bornes IMPOSSIBLE à produire.
 

@@ -775,8 +775,61 @@ Réponse en français :"""
 # terminal cp1252** — passer par un fichier UTF-8.
 #
 # Et il en manquera encore d'autres. **Un taux de refus se lit, il ne se compte pas.**
+# Négations de DISPONIBILITÉ : « il n'y a pas… », « je ne trouve pas… ».
+#
+# C'est la moitié d'une RÈGLE À DEUX SIGNAUX (voir `est_un_refus`) : ces mots
+# seuls ne suffisent pas, parce qu'une réponse peut commencer par « لا يجوز »
+# — une fatwa, pas un refus.
+NEGATIONS_DISPONIBILITE = (
+    "لا يوجد",
+    "لا توجد",
+    "لا اوجد",
+    "لا وجدت",
+    "لا اجد",
+    "لا نجد",
+    "لا اعلم",
+    "لا نعلم",
+    "لم اجد",
+    "لم نجد",
+    "لم يوجد",
+    "لم توجد",
+    "لم ينص",
+    "لم يذكر",
+    "لم يرد",
+    "لا يتضمن",
+    "لا تتضمن",
+    "لا يذكر",
+    "لا تذكر",
+    "لا يرد",
+    "لا ترد",
+    "ليس هناك",
+    "لا شيء",
+)
+
+# Références à la SOURCE. C'est la seconde moitié, et c'est elle qui distingue
+# « le texte ne dit rien » — un refus — de « telle chose est interdite » — une
+# réponse. Les deux signaux peuvent être ÉLOIGNÉS l'un de l'autre dans la phrase,
+# ce qui condamne toute recherche de phrase exacte.
+#
+# Formes NORMALISÉES (sans hamza, ة → ه) : « الوثائق » s'écrit ici « الوثايق ».
+REFERENCES_SOURCE = (
+    "السياق",
+    "السياقات",
+    "النص",
+    "النصوص",
+    "الوثايق",
+    "المرفق",
+    "المقدم",
+    "المذكور",
+    "المشار",
+    "السطور",
+    "المستخرج",
+    "المصادر",
+)
+
 FORMULES_DE_REFUS = {
     "ar": (
+        # Formules que l'INVITE impose — celles-ci ne varient pas.
         "لا توجد معلومات",
         "لا توجد المعلومات",
         "لا يوجد معلومات",
@@ -790,6 +843,10 @@ FORMULES_DE_REFUS = {
         "لا توجد في الوثايق",
         "لا اوجد الاجابه",
         "لا تجد الاجابه",
+        # Refus COMPLET en deux mots : il n'y a pas de seconde source à exiger, et
+        # la règle à deux signaux ne peut donc pas le reconnaître. Observé sur
+        # « هل يفطر الصائم… » → « لا جواب. », qui a laissé passer un passage.
+        "لا جواب",
     ),
     "fr": (
         "pas assez d informations",
@@ -799,6 +856,30 @@ FORMULES_DE_REFUS = {
         "ne permet pas de repondre",
     ),
 }
+
+
+def _est_un_refus_par_signaux(normalisee: str) -> bool:
+    """Refus reconnu par la RÈGLE À DEUX SIGNAUX : négation + référence à la source.
+
+    ⚠️ POURQUOI cette règle, et pas une liste de phrases de plus. Mesuré le
+    01/10 sur le régime `refus_puis_selection` (24 questions hors corpus × 2) : le
+    détecteur par formules manquait **6 refus sur 33 (18 %)**, ce qui faisait
+    tomber le renoncement du régime à 27/48 quand le modèle, lui, refusait 33 fois.
+    L'écart était entièrement attribuable au détecteur — et il avait fallu LIRE
+    les 21 brouillons pour le savoir.
+
+    Les six formes manquées avaient un point commun : une négation de
+    disponibilité ET une référence à la source, souvent SÉPARÉES par d'autres
+    mots (« لا يوجد في السياق المستخرج معلومات عن… »). Aucune liste de phrases
+    exactes ne peut les couvrir ; deux signaux, oui.
+
+    ⚠️ L'erreur inverse est plus coûteuse : « لا يجوز بيع الأسهم » contient une
+    négation mais aucun mot de source, et c'est une FATWA, pas un refus — la
+    conjonction des deux signaux est donc nécessaire, chacun seul ne suffit pas.
+    """
+    a_negation = any(mot in normalisee for mot in NEGATIONS_DISPONIBILITE)
+    a_reference = any(mot in normalisee for mot in REFERENCES_SOURCE)
+    return a_negation and a_reference
 
 
 def est_un_refus(reponse: str, language: str = "ar") -> bool:
@@ -818,10 +899,15 @@ def est_un_refus(reponse: str, language: str = "ar") -> bool:
     trompeuse.
     """
     normalisee = _normaliser_pour_refus(reponse)
+    if language != "ar":
+        return any(
+            _normaliser_pour_refus(formule) in normalisee
+            for formule in FORMULES_DE_REFUS.get(language, FORMULES_DE_REFUS["ar"])
+        )
     return any(
         _normaliser_pour_refus(formule) in normalisee
-        for formule in FORMULES_DE_REFUS.get(language, FORMULES_DE_REFUS["ar"])
-    )
+        for formule in FORMULES_DE_REFUS["ar"]
+    ) or _est_un_refus_par_signaux(normalisee)
 
 
 def _normaliser_pour_refus(texte: str) -> str:

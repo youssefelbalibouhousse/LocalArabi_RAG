@@ -578,7 +578,8 @@ ancre ensuite la réponse dans un passage réel.
 | régime, sur les 24 questions hors corpus × 2 | renonce |
 |---|---|
 | sélection seule | 4 / 48 — 8,3 % |
-| **`refus_puis_selection`** | **26 / 48 — 54,2 %** |
+| **`refus_puis_selection`**, mesuré | **27 / 48 — 56,3 %** |
+| **`refus_puis_selection`**, détecteur corrigé (recompté hors ligne) | **33 / 48 — 68,8 %** |
 | texte libre seul | 34 / 48 — 70,8 % |
 
 **Six fois et demie mieux que la sélection seule, et zéro choix illisible** (48/48).
@@ -588,24 +589,48 @@ décider, et c'est ce qui permet d'utiliser `generate` (un appel) au lieu
 d'`answer_question`, dont la reprise de langue coûterait un appel de plus pour un
 texte qu'on jette.
 
-⚠️ **Mais 16 points sous la cible de 71 %, et je ne sais pas encore pourquoi.**
-L'écart entre 26 et 34 a deux causes possibles, et elles n'appellent pas la même
-correction :
+#### L'écart de 6 points était le DÉTECTEUR, et il a fallu lire pour le savoir
 
-- le détecteur a **manqué** des refus (il en manquait 7 sur 34 avant d'être étendu) ;
-- ou le modèle a simplement **moins refusé** dans cette exécution — il est
-  stochastique, et 48 essais ne fixent pas un taux à 1,7 point près.
+La première mesure donnait 26 / 48, soit 15 points sous le texte libre. Deux causes
+possibles, qui n'appellent pas la même correction : le détecteur a **manqué** des
+refus, ou le modèle a simplement **moins refusé** dans cette exécution. **Le
+détecteur ne peut pas répondre à cette question, puisqu'il est l'objet du doute** —
+il fallait lire les 21 brouillons qui avaient laissé passer un passage :
 
-⚠️ **Je ne peux pas trancher, et c'est un défaut de mon instrument, pas du modèle.**
-`repondre_par_refus_puis_selection` rendait la sortie brute de la **sélection** —
-donc celle du second appel — ce qui **écrasait le brouillon** du premier. Or c'est
-le brouillon qui porte la décision : un refus manqué ne se voit que dans son texte.
-Le régime rend donc maintenant le brouillon, et il est consigné sous `brut_decision`
-(et non `selection_brute`, qui ne décrivait plus son contenu).
+| les 21 brouillons où un passage a été montré | |
+|---|---|
+| le brouillon **était un refus** que le détecteur a manqué | **6** |
+| le brouillon était une vraie réponse — ou du charabia | 15 |
 
-La règle vaut au-delà de ce cas : **c'est la sortie qui a DÉCIDÉ qu'il faut
-conserver, pas la dernière produite**. Le même trou avait déjà rendu les choix
-illisibles indiagnosticables, avant que la sortie brute ne soit conservée.
+Donc avec un détecteur correct, le régime renoncerait **33 / 48 (68,8 %)**, soit le
+niveau du texte libre. **L'écart venait entièrement du détecteur, pas du modèle.**
+
+⚠️ Et la cause est structurelle : les six formes manquées ont un point commun —
+une négation de disponibilité **et** une référence à la source, **souvent séparées
+par d'autres mots** (« لا يوجد في السياق المستخرج معلومات عن… »). Aucune liste de
+phrases exactes ne peut les couvrir. D'où une **règle à deux signaux** : négation
+de disponibilité + référence à la source. Les deux sont nécessaires —
+« لا يجوز بيع الأسهم » contient une négation mais c'est une **fatwa**, et
+« حسب السياق أدناه، الإجابة هي: Au » cite le contexte pour **affirmer**.
+
+| vérification de la règle | résultat |
+|---|---|
+| refus lus, attrapés (échantillon du diagnostic) | **33 / 33** |
+| **faux positifs** sur les 12 réponses à des questions répondables | **0** |
+| refus détectés sur l'échantillon du texte libre (lecture : 34) | 34 / 48 |
+
+⚠️ Le premier chiffre est un **ajustement** : la règle a été écrite sur ces
+réponses-là. Les deux suivants sont des échantillons **indépendants**, et c'est
+eux qui comptent — un faux positif coûte une réponse qui existait.
+
+#### ⚠️ Et le dernier chiffre qui reste : 15 / 48 — c'est le MODÈLE
+
+Une fois le détecteur corrigé, les 15 cas restants sont des réponses que le modèle
+a réellement produites sur des questions sans réponse : « لا يجوز ذلك », « لا بأس
+بذلك », une recette de couscous, « 1989 » (chute du mur de Berlin). Deux d'entre
+elles se **contredisent** — à « ما حكم استخدام مكبر الصوت في الأذان » le modèle a
+répondu « لا بأس بذلك » puis, à une autre exécution, « لا يباح ». **Aucun réglage
+de prompt ne corrige une réponse que le modèle ne veut pas retenir.**
 
 #### Une affirmation retirée du gabarit
 
