@@ -227,6 +227,48 @@ def ask(
 
     context = "\n\n".join(docs)
 
+    # 2bis. RÉGIMES EXPÉRIMENTAUX (voir config.ANSWER_MODE).
+    #
+    # "selection"             : le modèle choisit un passage, il ne rédige rien.
+    # "refus_puis_selection"  : renoncement d'abord (question ouverte), ancrage
+    #                           ensuite (sélection).
+    #
+    # Mesuré avant de construire ceci : quatre vérifications de texte libre ont
+    # échoué (seuil de distance, mot absent du corpus, contrôle de fidélité,
+    # citation obligatoire). La raison est constante — le modèle écrit dans la
+    # langue du corpus, et rien de lexical ne distingue ce qu'il a lu de ce qu'il
+    # sait.
+    #
+    # ⚠️ MESURÉ, sur les 24 questions SANS réponse dans le corpus (48 essais) :
+    #   texte libre seul ....... renonce 34 / 48  (71 %)
+    #   sélection seule ........ renonce  4 / 48  ( 8 %)
+    # La sélection supprime l'invention de TEXTE mais désigne un passage même
+    # quand aucun ne répond. `refus_puis_selection` prend donc la décision de
+    # renoncer au régime qui sait la prendre, et l'ancrage à celui qui l'impose.
+    # ⚠️ Le coût tombe du bon côté : UN SEUL appel quand la réponse est absente,
+    # DEUX quand elle est présente.
+    if config.ANSWER_MODE != "texte":
+        if config.ANSWER_MODE == "selection":
+            texte, choix, _brute = rag.repondre_par_selection(
+                question, docs, sources, language
+            )
+        else:
+            texte, choix, _brute = rag.repondre_par_refus_puis_selection(
+                question, docs, sources, language
+            )
+        # ⚠️ `choix > 0`, et non une simple vérité : 0 est un RENONCEMENT (le
+        # modèle déclare qu'aucun passage ne répond) et None une LECTURE
+        # IMPOSSIBLE. Les deux mènent au même `no_info`, mais les confondre a
+        # déjà fait publier « 0 abstention sur 48 » là où il y en avait 4.
+        repondu = choix is not None and choix > 0
+        return {
+            "question": question,
+            "answer": texte if repondu else no_info,
+            "sources": [sources[choix - 1]] if repondu else [],
+            "context_used": docs,
+            "language": language,
+        }
+
     # 2. GENERATE — réponse basée uniquement sur le contexte, dans la langue demandée.
     # `answer_question` (et non `generate`) : elle vérifie en plus que la langue
     # RÉELLEMENT produite correspond à celle demandée, et demande une réécriture

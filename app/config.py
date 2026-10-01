@@ -141,6 +141,126 @@ if EMBEDDING_TIMEOUT < 1:
 # ne sont pas calibrées). Exemple d'activation : DISTANCE_THRESHOLD=1.0
 DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "-1"))
 
+# --- Citation verbatim (EXPÉRIMENTAL, désactivé par défaut) ---------------
+#
+# POURQUOI. Trois vérifications déterministes ont été essayées pour empêcher le
+# modèle d'inventer, et les trois ont échoué (voir README.md, « Trois
+# vérifications déterministes essayées, trois échecs »). La raison est constante :
+# les inventions sont faites du VOCABULAIRE du corpus, donc indistinguables
+# lexicalement. Ce qui distingue une citation d'une invention est sémantique.
+#
+# D'où le renversement : ne plus vérifier une réponse libre, mais exiger du
+# modèle une CITATION verbatim, et vérifier cette citation (`app/fidelite.py`).
+# La vérification redevient exacte — la citation est dans le contexte, ou elle
+# n'y est pas — et le modèle ne peut pas tricher.
+#
+# Pourquoi un drapeau : pour mesurer les deux régimes avec le MÊME code, comme
+# `HYBRID_ENABLED`. Un réglage qu'on ne peut pas comparer ne se démontre pas.
+CITATIONS_OBLIGATOIRES = _env_flag("CITATIONS_OBLIGATOIRES", False)
+
+# --- Régime de réponse (EXPÉRIMENTAL) -------------------------------------
+#
+# TROIS régimes, mutuellement exclusifs, nommés plutôt que décrits par des
+# booléens : avec deux drapeaux, la combinaison « les deux à true » n'aurait
+# aucun sens et il faudrait décider laquelle gagne.
+#
+#   "texte"                  production. Le modèle rédige sa réponse.
+#   "selection"              le modèle CHOISIT un passage, il ne rédige rien.
+#   "refus_puis_selection"   renoncement d'abord (question ouverte), ancrage
+#                            ensuite (sélection) — voir POURQUOI ci-dessous.
+#
+# POURQUOI ces régimes existent. Quatre tentatives pour empêcher le modèle
+# d'inventer ont échoué : seuil de distance, mot absent du corpus, contrôle de
+# fidélité, citation obligatoire. Le mur est toujours le même : **une génération
+# libre est invérifiable**, parce que le modèle écrit dans la langue du corpus et
+# que rien de lexical ne distingue ce qu'il a lu de ce qu'il sait.
+#
+# D'où le renversement de "selection" : on ne VÉRIFIE plus ce que le modèle écrit,
+# on l'empêche d'écrire. Le texte montré est alors TOUJOURS un passage du corpus,
+# avec sa référence — l'invention devient impossible par construction.
+#
+# ⚠️ MAIS "selection" A ÉTÉ MESURÉ ET NE SUFFIT PAS, sur les 24 questions sans
+# réponse dans le corpus (48 essais) : le modèle n'a renoncé que **4 fois sur 48**
+# (8 %). Il désigne un passage même quand aucun ne répond, et le système le
+# présente alors comme une réponse. L'invention de texte est supprimée, la
+# mauvaise réponse ne l'est pas.
+#
+# Ce qui a donné "refus_puis_selection", mesuré sur les MÊMES 24 questions × 2 :
+# le TEXTE LIBRE renonce **34 fois sur 48 (71 %)** — 80 % sur les questions
+# éloignées, 56 % sur les proches du domaine. Autrement dit : le modèle SAIT dire
+# « je ne sais pas » en question ouverte, et ne le dit presque jamais quand on lui
+# demande de choisir. Une question à choix multiple appelle une réponse ; une
+# question ouverte admet l'ignorance.
+#
+# "refus_puis_selection" prend donc chaque régime là où il est le meilleur : la
+# question ouverte décide s'il faut renoncer, la sélection ancre ensuite la réponse
+# dans un passage réel. ⚠️ Le coût tombe du bon côté — UN SEUL appel quand la
+# réponse est absente (l'utilisateur n'attend rien), DEUX quand elle est présente.
+#
+# ⚠️ Ce régime N'EST PAS PARFAIT : les 14 cas sur 48 où le texte libre ne renonce
+# pas sont du pire type (fatwas brèves, faits de la mémoire du modèle, et deux
+# réponses CONTRADICTOIRES à la même question). Il ne les rattrape pas — il montre
+# un passage hors sujet dans 29 % des cas au lieu de 92 %. Trois fois mieux, pas
+# parfait, et la décision de renoncer dépend d'un détecteur imparfait (voir
+# `rag.FORMULES_DE_REFUS`).
+ANSWER_MODE = os.getenv("ANSWER_MODE", "texte").strip().lower()
+if ANSWER_MODE not in {"texte", "selection", "refus_puis_selection"}:
+    raise ValueError(
+        "ANSWER_MODE doit valoir 'texte', 'selection' ou 'refus_puis_selection', "
+        f"reçu : {ANSWER_MODE!r}"
+    )
+
+# Étiquettes des passages : "chiffres" (défaut) ou "lettres".
+#
+# ⚠️ MESURÉ sur 12 questions × 2 répétitions, base « prendre le premier extrait »
+# = 10/24 :
+#   chiffres → 12/24 puis 11/24 choix justes (3 puis 5 illisibles)
+#   lettres  →  8/24 choix justes (6 illisibles)
+# Les lettres ne sont PAS meilleures, et l'échantillon suggère pire — mais à 24
+# essais, l'écart n'est pas résolu : ce qui est certain, c'est que **l'alphabet
+# n'est pas la cause**. La cause est que la sortie reste du TEXTE LIBRE, et le
+# modèle y recopie ce qu'il voit :
+#   - avec des chiffres : « 370 », « 369 », « 1062 » (des numéros de LIGNE du
+#     corpus, qui en porte un en tête de CHAQUE ligne) et « 6 » pour 5 passages ;
+#   - avec des lettres : « أ », « د » — il a traduit « حرف المقطع » dans SON
+#     alphabet (أ، ب، ج، د) — et « 1062 » est resté.
+# Changer d'alphabet déplace donc l'ambiguïté au lieu de la supprimer. On garde
+# les chiffres, dont le dossier mesuré est le meilleur, et on contraint la SORTIE
+# (voir SELECTION_CHOIX).
+SELECTION_ETIQUETTES = os.getenv("SELECTION_ETIQUETTES", "chiffres").strip().lower()
+if SELECTION_ETIQUETTES not in {"lettres", "chiffres"}:
+    raise ValueError(
+        f"SELECTION_ETIQUETTES doit valoir 'lettres' ou 'chiffres', "
+        f"reçu : {SELECTION_ETIQUETTES!r}"
+    )
+
+# Forme de la réponse attendue du modèle : "json" (défaut) ou "texte".
+#
+# POURQUOI. Mesuré sur 12 questions × 2 répétitions (base « prendre le premier
+# extrait », sans modèle = 10/24 ; plafond de récupération = 20/24) :
+#
+#   | protocole         | choix justes | illisibles |
+#   |-------------------|--------------|------------|
+#   | chiffres, texte   | 12 puis 11   | 3 puis 5   |
+#   | lettres, texte    |      8       |     6      |
+#   | **JSON contraint**|   **15**     |   **0**    |
+#
+# L'illisibilité n'est pas « moins fréquente » avec "json" : elle devient
+# IMPOSSIBLE. Le schéma passé au client contraint la génération des tokens à un
+# entier entre 0 et le nombre de passages, donc un numéro de ligne recopié
+# (« 1062 ») ne PEUT plus sortir. Sur les 3 questions qui échouaient à chaque
+# essai en texte : « 6 » → {"passage": 2}, « 370 » → {"passage": 1},
+# « 1062 » → {"passage": 1} (et c'était la bonne page).
+#
+# ⚠️ Ce n'est pas non plus une garantie de JUSTESSE : « passage lu » ne veut pas
+# dire « bon passage ». Le plafond reste 20/24, et 5 essais sur 24 avaient le bon
+# extrait visible sans être choisi.
+SELECTION_CHOIX = os.getenv("SELECTION_CHOIX", "json").strip().lower()
+if SELECTION_CHOIX not in {"texte", "json"}:
+    raise ValueError(
+        f"SELECTION_CHOIX doit valoir 'texte' ou 'json', reçu : {SELECTION_CHOIX!r}"
+    )
+
 # --- Recherche hybride (lexicale + vectorielle) ---------------------------
 #
 # POURQUOI elle existe, mesuré le 29/09 sur les 59 questions du jeu d'or :

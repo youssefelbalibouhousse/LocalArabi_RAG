@@ -98,3 +98,90 @@ def test_le_verdict_ignore_les_mots_qui_ne_sont_que_suspects():
 )
 def test_exemples_borne_l_affichage(elements, attendu):
     assert fidelite.exemples(elements) == attendu
+
+# --- La citation verbatim ------------------------------------------------
+#
+# Seconde voie, après l'échec de la première : chercher les ÉLÉMENTS d'une
+# réponse libre ne marche pas, parce que les inventions du modèle sont faites du
+# vocabulaire du corpus. On ne vérifie donc plus la réponse, on vérifie la
+# CITATION que le modèle doit produire.
+
+CONTEXTE_CITATION = (
+    "قال جابر: بايعناه وعمر آخذ بيده تحت الشجرة وهي سمرة، بايعناه على أن لا نفر."
+)
+
+
+def test_les_citations_sont_extraites_entre_les_delimiteurs():
+    reponse = "الجواب: [[قال جابر: بايعناه تحت الشجرة]]. وهذا يدل على الجواز."
+
+    assert fidelite.citations(reponse) == ("قال جابر: بايعناه تحت الشجرة",)
+
+
+def test_plusieurs_citations_sont_extraites_dans_l_ordre():
+    reponse = "أولا [[النص الأول]] ثم [[النص الثاني]]."
+
+    assert fidelite.citations(reponse) == ("النص الأول", "النص الثاني")
+
+
+def test_une_reponse_sans_citation_n_en_contient_aucune():
+    """C'est un FAIT, pas un jugement : une réponse sans citation n'est pas vérifiable."""
+    assert fidelite.citations("لا بأس به.") == ()
+
+
+def test_un_delimiteur_ouvert_sans_fermeture_est_ignore():
+    """Ne PAS deviner où la citation s'arrête : mieux vaut ne rien extraire."""
+    assert fidelite.citations("الجواب [[نص مقطوع") == ()
+
+
+def test_une_citation_recopiee_est_verifiee():
+    reponse = f"الجواب: [[{CONTEXTE_CITATION}]]"
+
+    assert fidelite.citations_non_verifiees(reponse, CONTEXTE_CITATION) == ()
+
+
+def test_une_citation_absente_du_contexte_est_signalee():
+    """Le cas qui compte : une citation que le texte ne contient pas est FABRIQUÉE.
+
+    C'est le seul cas où l'invention est mécaniquement démontrable — et c'est
+    exactement ce que la première voie ne savait pas faire.
+    """
+    reponse = "الجواب: [[يحرم استخدام مكبر الصوت في الأذان]]"
+
+    non_verifiees = fidelite.citations_non_verifiees(reponse, CONTEXTE_CITATION)
+
+    assert non_verifiees == ("يحرم استخدام مكبر الصوت في الأذان",)
+
+
+def test_la_verification_tolere_diacritiques_et_espaces():
+    """Le modèle recopie avec ou sans voyelles, et change parfois les espaces.
+
+    La comparaison reste littérale — c'est la PHRASE qui doit s'y trouver — mais
+    elle ne doit pas échouer sur ce qui ne change pas le texte.
+    """
+    contexte = "قَالَ جَابِرٌ: بَايَعْنَاهُ وَعُمَرُ آخِذٌ بِيَدِهِ تَحْتَ الشَّجَرَةِ"
+    reponse = "الجواب: [[قال جابر: بايعناه وعمر آخذ بيده تحت الشجرة]]"
+
+    assert fidelite.citations_non_verifiees(reponse, contexte) == ()
+
+
+def test_une_citation_partielle_ne_passe_pas():
+    """Vérifier la PHRASE et non ses mots : c'est tout l'intérêt du mécanisme.
+
+    Un contrôle par mots validerait cette citation, parce que chacun de ses mots
+    existe quelque part dans le contexte — et c'est précisément l'échec mesuré de
+    la première voie.
+    """
+    reponse = "الجواب: [[قول آخر قال به بعض الناس]]"
+
+    assert len(fidelite.citations_non_verifiees(reponse, CONTEXTE_CITATION)) == 1
+
+
+def test_les_citations_valides_et_fabriquees_sont_separees():
+    reponse = (
+        f"الجواب: [[{CONTEXTE_CITATION}]] "
+        "ثم [[نص لا وجود له في السياق]]"
+    )
+
+    non_verifiees = fidelite.citations_non_verifiees(reponse, CONTEXTE_CITATION)
+
+    assert non_verifiees == ("نص لا وجود له في السياق",)

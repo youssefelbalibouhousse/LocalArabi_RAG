@@ -764,3 +764,441 @@ def test_l_apostrophe_francaise_ne_fait_pas_echouer_la_reconnaissance():
     assert rag.est_un_refus(
         "Désolé, il n'y a pas assez d'informations dans les documents fournis.", "fr"
     )
+
+# --- Sélection de passage (expérimental) ---------------------------------
+#
+# Le renversement : on ne VÉRIFIE plus ce que le modèle écrit, on l'empêche
+# d'écrire. Il choisit une étiquette, et le texte montré est un passage du corpus.
+
+
+def test_les_passages_sont_etiquetes_par_des_lettres(monkeypatch):
+    """Des LETTRES, pas des chiffres — voir le test suivant pour la raison."""
+    monkeypatch.setattr(rag.config, "SELECTION_ETIQUETTES", "lettres")
+
+    contexte = rag.numeroter_passages(["premier", "deuxième"])
+
+    assert contexte == "[A] premier\n\n[B] deuxième"
+
+
+def test_les_passages_peuvent_etre_numerotes_en_chiffres(monkeypatch):
+    """L'ancien protocole reste accessible : sans lui, la comparaison ne serait
+    plus reproductible."""
+    monkeypatch.setattr(rag.config, "SELECTION_ETIQUETTES", "chiffres")
+
+    contexte = rag.numeroter_passages(["premier", "deuxième"])
+
+    assert contexte == "[1] premier\n\n[2] deuxième"
+
+
+@pytest.mark.parametrize(
+    ("reponse", "attendu"),
+    [
+        ("C", 3),
+        ("  b  ", 2),
+        ("[B]", 2),
+        ("A\n", 1),
+        # Un modèle qui commente avant de conclure écrit sa conclusion à la fin :
+        # c'est le DERNIER jeton utile qui compte.
+        ("المقاطع B و C، والوسم D", 4),
+        # Zéro : le modèle déclare qu'aucun passage ne répond. Ce n'est pas un
+        # échec de lecture, c'est une réponse — la bonne sur une question que le
+        # corpus ne peut pas trancher.
+        ("0", 0),
+    ],
+)
+def test_le_choix_est_lu_en_lettres(reponse, attendu):
+    assert rag.lire_choix(reponse, 5, lettres=True, json_format=False) == attendu
+
+
+@pytest.mark.parametrize(
+    ("reponse", "attendu"),
+    [
+        ("3", 3),
+        ("  2  ", 2),
+        ("الجواب هو 4", 4),
+        ("1\n", 1),
+        ("المقاطع 1 و 2 و 3، والجواب 2", 2),
+        ("0", 0),
+    ],
+)
+def test_le_choix_est_lu_en_chiffres(reponse, attendu):
+    assert rag.lire_choix(reponse, 5, lettres=False, json_format=False) == attendu
+
+
+def test_en_lettres_un_chiffre_n_est_PAS_un_choix():
+    """Le défaut mesuré qui a motivé les lettres, verrouillé ici.
+
+    Le corpus porte un numéro de ligne en tête de CHAQUE ligne (« 369 - … »).
+    Avec des étiquettes chiffrées, le modèle a répondu « 370 », « 369 », « 1062 »
+    ou « 6 » pour cinq passages : il recopiait un numéro de LIGNE, ou inventait
+    un rang. En lettres, un chiffre dans la réponse est un numéro de ligne
+    recopié, donc précisément ce qu'il ne faut PAS interpréter.
+    """
+    for recopie in ("370", "369", "1062", "6"):
+        assert rag.lire_choix(recopie, 5, lettres=True, json_format=False) is None, recopie
+
+
+@pytest.mark.parametrize(
+    ("reponse", "nombre"),
+    [
+        ("", 5),
+        ("aucun", 5),
+        ("Z", 5),      # hors bornes : on ne devine pas
+        ("-2", 5),     # un signe négatif n'est pas un choix
+        ("6", 5),      # mesuré : le modèle a répondu 6 pour 5 passages
+    ],
+)
+def test_un_choix_illisible_vaut_none(reponse, nombre):
+    """On ne DEVINE pas : un choix illisible doit être mesurable comme un refus."""
+    assert rag.lire_choix(reponse, nombre, lettres=True, json_format=False) is None
+
+
+def test_en_chiffres_un_numero_hors_bornes_reste_illisible():
+    assert rag.lire_choix("9", 5, lettres=False, json_format=False) is None
+    assert rag.lire_choix("-2", 5, lettres=False, json_format=False) is None
+
+
+def test_le_passage_choisi_est_rendu_avec_sa_reference():
+    """Le texte montré vient du corpus, jamais du modèle : c'est tout l'intérêt."""
+    documents = ["نص أول", "نص ثانٍ يجيب عن السؤال"]
+    sources = [
+        {"source": "a.epub", "title": "Livre A", "page": 1, "line_start": 1, "line_end": 2},
+        {"source": "b.epub", "title": "Livre B", "page": 42, "line_start": 3, "line_end": 9},
+    ]
+    texte = rag.format_passage_choisi(documents[1], sources[1])
+
+    assert "نص ثانٍ يجيب عن السؤال" in texte
+    assert "Livre B" in texte
+    assert "42" in texte
+
+
+def test_le_gabarit_n_affirme_pas_que_le_passage_repond():
+    """Le titre ne doit affirmer que ce que le système SAIT.
+
+    Il disait « المقطع الذي يجيب عن السؤال » — « le passage qui répond à la
+    question ». Or mesuré sur 24 questions SANS réponse dans le corpus (48
+    essais), le modèle n'a renoncé que 4 fois : dans les 44 autres cas, ce titre
+    aurait affirmé une chose fausse, sous une forme que l'utilisateur n'a aucun
+    moyen de contester puisqu'elle vient du système et non du texte.
+
+    Le système sait quel passage il a choisi ; il ne sait pas si ce passage
+    répond. Il ne doit donc l'affirmer dans AUCUN cas — pas même quand c'est vrai,
+    puisque c'est invérifiable de son côté.
+    """
+    document = "نص"
+    source = {"source": "a.epub", "title": "Livre A", "page": 1, "line_start": 1, "line_end": 2}
+
+    arabe = rag.format_passage_choisi(document, source, language="ar")
+    francais = rag.format_passage_choisi(document, source, language="fr")
+
+    assert "يجيب عن السؤال" not in arabe
+    assert "répond à la question" not in francais
+    # Le titre reste, mais il dit une chose VÉRIFIABLE : ce passage a été choisi.
+    assert "المختار" in arabe
+    assert "sélectionné" in francais
+
+
+def test_la_selection_rend_le_passage_et_son_rang(monkeypatch):
+    """Le protocole par DÉFAUT, de bout en bout : sortie JSON contrainte."""
+    documents = ["نص أول", "نص ثانٍ يجيب عن السؤال"]
+    sources = [
+        {"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2},
+        {"source": "b.epub", "page": 42, "line_start": 3, "line_end": 9},
+    ]
+    monkeypatch.setattr(rag, "generate_selection", lambda q, c, lang, n: '{"passage": 2}')
+
+    texte, choix, brute = rag.repondre_par_selection("سؤال", documents, sources)
+
+    assert choix == 2
+    assert brute == '{"passage": 2}'
+    assert "نص ثانٍ يجيب عن السؤال" in texte
+
+
+def test_la_selection_s_abstient_quand_aucun_passage_ne_repond(monkeypatch):
+    """L'abstention est le comportement voulu, pas un échec : rien n'est inventé."""
+    monkeypatch.setattr(rag, "generate_selection", lambda q, c, lang, n: '{"passage": 0}')
+
+    texte, choix, brute = rag.repondre_par_selection(
+        "سؤال", ["نص"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert texte == ""
+    assert choix == 0
+    assert brute == '{"passage": 0}'
+
+
+def test_l_abstention_est_rendue_comme_0_et_non_comme_un_echec(monkeypatch):
+    """⚠️ Test de NON-RÉGRESSION sur un bug qui a faussé une mesure publiée.
+
+    Le code faisait ``if not choix:`` dans `repondre_par_selection`. Comme ``0``
+    est falsy en Python, une abstention — qui est une RÉPONSE, et la bonne sur
+    une question que le corpus ne peut pas trancher — était rendue comme un échec
+    de lecture. Le rapport annonçait donc « **0 abstention sur 48** » là où il y
+    en avait **4**, dans le sens le plus défavorable au mécanisme.
+
+    ``0`` et ``None`` mènent au même texte vide, et c'est précisément pourquoi la
+    confusion ne se voyait pas : elle ne se lit que dans le second élément du
+    triplet. Même famille de piège que ``all([])`` dans `est_orpheline`.
+    """
+    monkeypatch.setattr(rag, "generate_selection", lambda q, c, lang, n: '{"passage": 0}')
+
+    texte, choix, brute = rag.repondre_par_selection(
+        "سؤال", ["نص"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert choix == 0          # une réponse
+    assert choix is not None   # et surtout PAS un échec de lecture
+    assert texte == ""         # rien à montrer, et c'est voulu
+    assert brute == '{"passage": 0}'
+
+
+def test_la_selection_ne_devine_pas_un_choix_illisible(monkeypatch):
+    """Une réponse hors protocole vaut un refus — et elle est CONSERVÉE.
+
+    Sans la sortie brute, ce cas serait indiscernable d'un modèle muet ou d'un
+    numéro hors bornes : le texte rendu est vide dans les trois cas.
+    """
+    monkeypatch.setattr(rag, "generate_selection", lambda q, c, lang, n: "بالتأكيد")
+
+    texte, choix, brute = rag.repondre_par_selection(
+        "سؤال", ["نص"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert texte == ""
+    assert choix is None
+    assert brute == "بالتأكيد"
+
+
+def test_un_numero_hors_bornes_reste_illisible_mais_est_conserve(monkeypatch):
+    """Mesuré : à qui l'on donne CINQ passages, le modèle a répondu « 6 ».
+
+    On ne rabat pas 6 sur 5 : il n'y a pas de sixième passage, donc il n'y a pas
+    de choix. Inventer une correspondance serait deviner — et un choix deviné
+    n'est plus vérifiable. La contrainte de sortie rend ce cas impossible à
+    produire, mais on ne s'y fie pas : elle est une garantie du fournisseur.
+    """
+    monkeypatch.setattr(rag, "generate_selection", lambda q, c, lang, n: '{"passage": 6}')
+
+    texte, choix, brute = rag.repondre_par_selection(
+        "سؤال", ["نص"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert texte == ""
+    assert choix is None
+    assert brute == '{"passage": 6}'
+
+
+def test_la_selection_sans_extrait_ne_rend_rien():
+    texte, choix, brute = rag.repondre_par_selection("سؤال", [], [])
+
+    assert texte == ""
+    assert choix is None
+    assert brute == ""
+
+
+def test_refus_puis_selection_renonce_sans_appeler_la_selection(monkeypatch):
+    """Le premier appel suffit à renoncer : on ne paie pas le second.
+
+    C'est tout l'intérêt du régime — le coût tombe du bon côté. Une question sans
+    réponse coûte UN appel, une question avec réponse en coûte DEUX.
+    """
+    monkeypatch.setattr(rag, "generate", lambda q, c, lang="ar": "لا توجد معلومات في السياق.")
+
+    def interdit(*args, **kwargs):
+        raise AssertionError("la sélection ne doit PAS être appelée après un refus")
+
+    monkeypatch.setattr(rag, "generate_selection", interdit)
+
+    texte, choix, brute = rag.repondre_par_refus_puis_selection(
+        "سؤال", ["نص"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert texte == ""
+    assert choix == 0           # renoncement, et non échec de lecture
+    assert brute == "لا توجد معلومات في السياق."
+
+
+def test_refus_puis_selection_ancre_quand_le_modele_ne_renonce_pas(monkeypatch):
+    """Le texte libre ne sert qu'à DÉCIDER : son contenu n'est jamais montré.
+
+    Il ferait pourtant ici une réponse parfaitement plausible — c'est justement
+    pourquoi on ne l'affiche pas : rien ne garantit qu'elle vienne du corpus.
+    """
+    monkeypatch.setattr(
+        rag, "generate", lambda q, c, lang="ar": "يحرم استخدام مكبر الصوت في الأذان."
+    )
+    monkeypatch.setattr(rag, "generate_selection", lambda q, c, lang, n: '{"passage": 1}')
+
+    texte, choix, brute = rag.repondre_par_refus_puis_selection(
+        "سؤال", ["نص المقطع"], [{"source": "a.epub", "page": 1, "line_start": 1, "line_end": 2}]
+    )
+
+    assert choix == 1
+    assert "نص المقطع" in texte          # le passage du corpus, pas la phrase du modèle
+    assert "يحرم" not in texte
+    # ⚠️ La sortie brute est le BROUILLON, pas le choix JSON : c'est lui qui porte
+    # la décision, et le perdre rendrait un renoncement manqué indiagnosticable.
+    assert brute == "يحرم استخدام مكبر الصوت في الأذان."
+
+
+def test_refus_puis_selection_sans_extrait_ne_rend_rien():
+    texte, choix, brute = rag.repondre_par_refus_puis_selection("سؤال", [], [])
+
+    assert texte == ""
+    assert choix is None
+    assert brute == ""
+
+
+@pytest.mark.parametrize(
+    "formule",
+    [
+        "لا توجد المعلومات اللازمة لرد السؤال.",
+        "لا يوجد صلة للسؤال في السياق.",
+        "لا أوجد الإجابة في السياق السابق.",
+        "لا تجد الإجابة في السياق المذكور.",
+        "لا يوجد معلومات في السياق المرفق عن حكم العمل في البنوك.",
+        "لا يوجد mention لذلك في النص.",
+    ],
+)
+def test_les_formules_de_refus_REELLEMENT_observees_sont_reconnues(formule):
+    """⚠️ Ces six-là avaient toutes échappé au détecteur, et il en manquait 7 sur 34.
+
+    Elles sont relevées sur des réponses réelles, lues dans un fichier UTF-8.
+
+    ⚠️ **Ne jamais lire de l'arabe dans un terminal Windows (cp1252).** Deux
+    formules ont d'abord été écrites FAUX pour cette raison : « أجد » au lieu de
+    « أوجد », et « توجد » au lieu de « يوجد ». Le détecteur ne les reconnaissait
+    donc toujours pas, et le test aurait validé une correction inopérante.
+    """
+    assert rag.est_un_refus(formule, "ar")
+
+
+@pytest.mark.parametrize(
+    "reponse",
+    [
+        "لا يجوز بيع الأسهم في البورصة.",     # une fatwa inventée, pas un refus
+        "لا.",                                  # une réponse d'un mot
+        "لا يباح.",
+        "حسب هذه المعلومات الجواب هو: لا بأس به.",  # contient « المعلومات », sans négation
+        "عام 1989.",
+    ],
+)
+def test_une_reponse_affirmee_n_est_PAS_un_refus(reponse):
+    """Faux positif = on refuse une réponse qui existe. C'est l'erreur coûteuse."""
+    assert not rag.est_un_refus(reponse, "ar")
+
+
+@pytest.mark.parametrize(
+    "formule",
+    [
+        # ⚠️ La règle à deux signaux : une négation de disponibilité ET une
+        # référence à la source, souvent SÉPARÉES par d'autres mots.
+        # Ces six-là laissaient passer un passage malgré un refus du modèle,
+        # ce qui faisait tomber le renoncement du régime de 33/48 à 27/48.
+        "لا يوجد شيء يتعلق بذلك في السياق السابق.",
+        "لا أوجد المعلومات في السياق المذكور لتوضيح ذلك.",
+        "لا يوجد في السياق المستخرج معلومات عن رمز كيميائي للذهب.",
+        "لا توجد جوابًا للأسئلة المطروحة في السياق. لم ينص على الحكم في السياق المقدم.",
+        "لا يوجد أي توجيهات واضحة في السياق حول حكم العمل في البنوك.",
+        "لا أعلم أي شيء يُسمى \"أستراليا\" في السياق المحدد.",
+        # Refus complet en deux mots : aucune seconde source à exiger, donc
+        # invisible pour la règle à deux signaux. Il a laissé passer un passage.
+        "لا جواب.",
+    ],
+)
+def test_un_refus_est_reconnu_meme_quand_les_signaux_sont_eloignes(formule):
+    """⚠️ Aucune liste de phrases exactes ne peut couvrir ces formes.
+
+    Les six premières ont un point commun — une négation de disponibilité ET une
+    référence à la source — mais séparées par d'autres mots. Le détecteur par
+    formules en manquait 6 sur 33 (18 %), et ces six-là ne se voyaient qu'en
+    LISANT les brouillons. La septième est l'inverse : un refus si court qu'il
+    n'a pas de second signal. D'où les deux mécanismes, l'un ne remplaçant pas
+    l'autre.
+    """
+    assert rag.est_un_refus(formule, "ar")
+
+
+@pytest.mark.parametrize(
+    "reponse",
+    [
+        # ⚠️ Une négation NE SUFFIT PAS : ce sont des fatwas, pas des refus.
+        "لا يجوز ذلك.",
+        "لا يجوز بيع الأسهم لأنها من البيوع الغرر.",
+        "لا بأس بذلك.",
+        "لا.",
+        # ⚠️ Une référence à la source NE SUFFIT PAS non plus :
+        # « selon le contexte, la réponse est : Au » cite le contexte pour
+        # affirmer, pas pour renoncer.
+        "حسب السياق أدناه، الإجابة هي: Au.",
+        "حسب هذه المعلومات الجواب هو: لا بأس به.",
+    ],
+)
+def test_un_seul_signal_ne_suffit_pas_a_conclure_au_refus(reponse):
+    """Faux positif = on refuse une réponse qui existe. C'est l'erreur coûteuse."""
+    assert not rag.est_un_refus(reponse, "ar")
+
+
+def test_le_schema_borne_l_entier_au_nombre_de_passages():
+    """C'est ce qui rend un choix hors bornes IMPOSSIBLE à produire.
+
+    Un numéro de ligne recopié (« 1062 ») ne sort plus : la contrainte porte sur
+    la génération des tokens, pas sur une vérification après coup.
+    """
+    schema = rag.schema_choix(5)
+
+    assert schema["properties"]["passage"]["type"] == "integer"
+    assert schema["properties"]["passage"]["minimum"] == 0
+    assert schema["properties"]["passage"]["maximum"] == 5
+    assert schema["required"] == ["passage"]
+
+
+@pytest.mark.parametrize(
+    ("reponse", "attendu"),
+    [
+        ('{"passage": 3}', 3),
+        ('  {"passage": 1}  ', 1),
+        ('{"passage": 0}', 0),   # abstention : une réponse, pas un échec
+        ('{"passage": 5}', 5),
+    ],
+)
+def test_le_choix_json_est_lu(reponse, attendu):
+    assert rag.lire_choix(reponse, 5, json_format=True) == attendu
+
+
+@pytest.mark.parametrize(
+    "reponse",
+    [
+        "1062",                      # un numéro de ligne, pas un objet JSON
+        "",
+        "{",
+        "[]",                        # un JSON valide, mais pas un objet
+        '{"autre": 2}',             # champ absent
+        '{"passage": "3"}',        # type inattendu : une chaîne
+        '{"passage": true}',        # un booléen est un int en Python : piège
+        '{"passage": 6}',           # hors bornes
+        '{"passage": -1}',
+    ],
+)
+def test_un_choix_json_illisible_vaut_none(reponse):
+    """⚠️ « La contrainte devrait l'empêcher » n'est PAS une preuve.
+
+    Le schéma est une garantie du fournisseur, pas de notre code : un autre
+    fournisseur, une version qui l'ignore, ou un `format` non transmis
+    laisseraient passer n'importe quoi. On vérifie donc quand même — c'est le
+    même principe que `corps_valide` pour une entrée utilisateur.
+    """
+    assert rag.lire_choix(reponse, 5, json_format=True) is None
+
+
+def test_l_invite_de_selection_demande_une_etiquette_et_previent_l_abstention():
+    """La tâche doit être FERMÉE : une étiquette, ou zéro. Rien d'autre."""
+    invite = rag.construire_invite_selection("سؤال", "[A] نص", lettres=True)
+
+    assert "[A] نص" in invite
+    assert "سؤال" in invite
+    assert "0" in invite
+    assert "حرف المقطع" in invite
+    # ⚠️ Sans cette consigne, un modèle recopie volontiers le texte — et la
+    # mesure a montré qu'il recopiait un numéro de LIGNE du corpus.
+    assert "لا تنسخ" in invite

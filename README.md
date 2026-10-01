@@ -440,12 +440,219 @@ Ce qui distingue une citation d'une invention n'est pas lexical, c'est **sémant
 Puisqu'aucun contrôle *a posteriori* ne fonctionne sur du texte libre, il reste à
 changer ce qu'on demande au modèle : **une citation verbatim du contexte à l'appui
 de chaque affirmation**. Le contrôle devient alors exact — la citation est dans le
-contexte, ou elle n'y est pas — et le modèle ne peut pas tricher : inventer une
-citation la fait échouer au contrôle, et ne pas en fournir le force au refus.
+contexte, ou elle n'y est pas.
 
-C'est le seul mécanisme où la vérification n'a pas besoin de comprendre le sens.
-Il reste à le tester avec `scripts/mesurer_reponses.py --repetitions`, et à
-mesurer son coût : un modèle qui ne se conforme pas produirait des refus à tort.
+C'est implémenté et mesuré : `CITATIONS_OBLIGATOIRES` (désactivé par défaut)
+exige la citation entre `[[ ]]` — un délimiteur absent du corpus, contrairement
+aux guillemets arabes « » qui ponctuent les textes édités — et
+`fidelite.citations_non_verifiees()` vérifie chaque citation **littéralement**,
+après normalisation arabe. Mesuré sur deux populations, deux exécutions chacune :
+
+| | 18 réponses hors corpus | 12 réponses à des questions répondables |
+|---|---|---|
+| refus | 4 | 0 |
+| **citation vérifiée** | 4 | 4 |
+| aucune citation | 9 | 5 |
+| **citation fabriquée** | 1 | **3** |
+| → deviendraient des refus si l'on exigeait la citation | 10 / 18 | **8 / 12** |
+
+**Le mécanisme marche comme détecteur, échoue comme empêchement.**
+
+- Il **démontre** une invention quand le modèle cite : `q083` a cité « إن القاضي
+  فإنه يحكم بشيء يجده في ديوانه بخطه » pour une question sur les banques — cette
+  phrase n'est pas dans le contexte. Le régime normal ne laissait aucune prise.
+- Mais le modèle **n'obéit qu'un tiers du temps** (9 réponses sans citation sur 18,
+  5 sur 12), et **fabrique la citation 3 fois sur 12 sur des questions où la
+  réponse existe pourtant**. L'invention n'est donc pas empêchée : elle reste
+  seulement *détectable quand le modèle choisit de citer*.
+- **Exiger la citation n'est pas livrable** : cela refuserait deux tiers des
+  questions auxquelles le système sait répondre. Le produit deviendrait inutilisable.
+
+⚠️ Et même une citation **vérifiée** n'est pas une réponse **juste** : les quatre
+citations validées sur les questions hors corpus étaient **toutes hors sujet**
+(`q075` répond sur les actions en citant une règle sur la dette). La citation rend
+une réponse *vérifiable*, pas *correcte*.
+
+### La voie structurelle : ne plus laisser le modèle écrire de texte libre
+
+Les quatre tentatives échouent toutes sur le même mur, et il faut le nommer :
+**une génération libre est invérifiable**, parce que le modèle écrit dans la langue
+du corpus et que rien de lexical ne distingue ce qu'il a lu de ce qu'il sait.
+
+La voie structurelle était donc la seule qui restait : faire **sélectionner** au
+modèle un passage parmi ceux qui ont été récupérés — ou déclarer qu'aucun ne
+convient — au lieu de le laisser rédiger. Le texte montré à l'utilisateur est
+alors **toujours un passage du corpus**, avec sa référence : l'invention devient
+**impossible par construction** plutôt que détectée après coup.
+
+**C'est construit et mesuré** (`ANSWER_MODE`, dont la valeur par défaut reste
+`texte` : le régime de production). Trois régimes sont nommés plutôt que décrits
+par des booléens, parce que deux drapeaux auraient une combinaison qui ne veut
+rien dire — `texte`, `selection`, `refus_puis_selection`.
+
+#### Ce que la construction a coûté à découvrir
+
+Le premier protocole demandait au modèle d'écrire un **numéro**. Il a répondu
+`370`, `369`, `1062` — des numéros de **ligne** : le corpus en porte un en tête de
+*chaque* ligne (« 369 - وأجمعوا… »). L'invite contenait donc deux numérotations
+concurrentes de même forme. Ma conclusion suivante — « il faut des lettres » — était
+**fausse**, et la mesure l'a démenti : avec des lettres, le modèle a rendu `أ` et
+`د`, c'est-à-dire « حرف المقطع » traduit dans *son* alphabet (أ، ب، ج، د), et
+`1062` est revenu. **Changer d'alphabet déplace l'ambiguïté, elle ne disparaît
+pas** : la cause est que la sortie est du texte libre.
+
+La correction qui agit sur la cause est de **contraindre la sortie** : le schéma
+JSON passé au client (`{"passage": entier 0..n}`) est appliqué *pendant la
+génération des tokens*. Un numéro de ligne recopié ne **peut plus** sortir.
+
+| protocole (12 questions × 2) | choix tombant sur la page attendue | illisibles |
+|---|---|---|
+| numéro, texte libre | 12 puis 11 / 24 | 3 puis 5 |
+| lettre, texte libre | 8 / 24 | 6 |
+| **JSON contraint** | **15 / 24** | **0** |
+| *base « prendre le premier extrait », sans modèle* | *10 / 24* | — |
+| *plafond de la récupération (le bon extrait était visible)* | *20 / 24* | — |
+
+⚠️ La base « rang 1 » est indispensable à la lecture : montrer le premier extrait
+**sans appeler le modèle** réussit déjà **30 / 59** (50,8 %) sur les 59 répondables.
+Un taux de choix justes qui ne la dépasse pas signifie que le modèle coûte 70 s par
+question pour faire moins bien que rien.
+
+#### ⚠️ Et ce qu'il NE fait pas : le mécanisme n'empêche pas de désigner un mauvais passage
+
+Mesuré sur les **24 questions sans réponse dans le corpus** (48 essais) :
+
+| | |
+|---|---|
+| abstentions du modèle (« aucun passage ne répond ») | **4 / 48** |
+| passages désignés malgré tout | **44 / 48** |
+| choix illisibles | **0 / 48** |
+
+**Sur 20 des 24 questions hors corpus, le modèle n'a jamais renoncé.** L'invention
+de *texte* est supprimée ; la *mauvaise réponse* ne l'est pas. Le mécanisme change
+donc la nature de l'échec, il ne le supprime pas.
+
+⚠️ **La comparaison avec le texte libre a été faite, et elle est sévère pour la
+sélection.** Les deux régimes ont été mesurés sur les **mêmes 24 questions × 2
+essais (48)** :
+
+| | texte libre | sélection de passage |
+|---|---|---|
+| **renonce** | **34 / 48 — 71 %** | **4 / 48 — 8 %** |
+| ne renonce pas | 14 / 48 — 29 % | 44 / 48 — 92 % |
+
+⚠️ Le détecteur par phrase n'en comptait que **27** : il a **manqué 7 refus sur 34
+(21 %)**, tous des reformulations parfaitement légitimes (« لا أجد الإجابة في
+السياق السابق », « لا يوجد صلة للسؤال في السياق », « لا تجد الإجابة في السياق
+المذكور »). Le chiffre définitif vient d'une **lecture** des 21 réponses non
+comptées — c'est la seule méthode que ce projet ait trouvée fiable, et le détecteur
+se trompe encore ici, dans le sens qui fait passer le système pour pire qu'il n'est.
+
+⚠️ **Et le découpage explique l'ancien « 12 / 15 », qui m'avait induit en erreur :**
+
+| sous-population | renonce | invente |
+|---|---|---|
+| 15 questions éloignées (astronomie, cuisine, football) | 24 / 30 — 80 % | 6 / 30 |
+| 9 questions proches du domaine (banque, bourse, organes…) | 10 / 18 — 56 % | **8 / 18 — 44 %** |
+
+Le « 12 / 15 » ne portait que sur les **éloignées**, c'est-à-dire les faciles. Sur
+les mêmes questions, le texte libre renonce **71 %**, et **56 % seulement** là où
+c'est difficile. Comparer ce chiffre à la sélection mesurée sur les 24 questions
+revenait à avantager le texte libre.
+
+Les 14 non-refus sont de la pire espèce, et deux se **contredisent** : à « ما حكم
+استخدام مكبر الصوت في الأذان » le modèle a répondu « لا يباح » puis « لا بأس به »,
+à une minute d'intervalle. Ailleurs : « عام 1989 » (chute du mur de Berlin), « Au »
+(symbole chimique de l'or), « لا. » puis « لا. » à une question sur la piqûre
+intraveineuse, et une recette de couscous.
+
+**Conclusion : le texte libre renonce 71 % du temps, la sélection 8 %.** Le premier
+sait dire « je ne sais pas », le second ne le dit pas — mais le premier invente du
+texte, et le second le rend impossible.
+
+### `refus_puis_selection` : prendre chaque régime là où il est le meilleur
+
+Construit et mesuré. La question ouverte décide s'il faut renoncer ; la sélection
+ancre ensuite la réponse dans un passage réel.
+
+| régime, sur les 24 questions hors corpus × 2 | renonce |
+|---|---|
+| sélection seule | 4 / 48 — 8,3 % |
+| **`refus_puis_selection`**, mesuré | **27 / 48 — 56,3 %** |
+| **`refus_puis_selection`**, détecteur corrigé (recompté hors ligne) | **33 / 48 — 68,8 %** |
+| texte libre seul | 34 / 48 — 70,8 % |
+
+**Six fois et demie mieux que la sélection seule, et zéro choix illisible** (48/48).
+Le coût tombe du bon côté : un seul appel quand la réponse est absente, deux quand
+elle est présente. Le texte du premier appel n'est jamais montré — il sert à
+décider, et c'est ce qui permet d'utiliser `generate` (un appel) au lieu
+d'`answer_question`, dont la reprise de langue coûterait un appel de plus pour un
+texte qu'on jette.
+
+#### L'écart de 6 points était le DÉTECTEUR, et il a fallu lire pour le savoir
+
+La première mesure donnait 26 / 48, soit 15 points sous le texte libre. Deux causes
+possibles, qui n'appellent pas la même correction : le détecteur a **manqué** des
+refus, ou le modèle a simplement **moins refusé** dans cette exécution. **Le
+détecteur ne peut pas répondre à cette question, puisqu'il est l'objet du doute** —
+il fallait lire les 21 brouillons qui avaient laissé passer un passage :
+
+| les 21 brouillons où un passage a été montré | |
+|---|---|
+| le brouillon **était un refus** que le détecteur a manqué | **6** |
+| le brouillon était une vraie réponse — ou du charabia | 15 |
+
+Donc avec un détecteur correct, le régime renoncerait **33 / 48 (68,8 %)**, soit le
+niveau du texte libre. **L'écart venait entièrement du détecteur, pas du modèle.**
+
+⚠️ Et la cause est structurelle : les six formes manquées ont un point commun —
+une négation de disponibilité **et** une référence à la source, **souvent séparées
+par d'autres mots** (« لا يوجد في السياق المستخرج معلومات عن… »). Aucune liste de
+phrases exactes ne peut les couvrir. D'où une **règle à deux signaux** : négation
+de disponibilité + référence à la source. Les deux sont nécessaires —
+« لا يجوز بيع الأسهم » contient une négation mais c'est une **fatwa**, et
+« حسب السياق أدناه، الإجابة هي: Au » cite le contexte pour **affirmer**.
+
+| vérification de la règle | résultat |
+|---|---|
+| refus lus, attrapés (échantillon du diagnostic) | **33 / 33** |
+| **faux positifs** sur les 12 réponses à des questions répondables | **0** |
+| refus détectés sur l'échantillon du texte libre (lecture : 34) | 34 / 48 |
+
+⚠️ Le premier chiffre est un **ajustement** : la règle a été écrite sur ces
+réponses-là. Les deux suivants sont des échantillons **indépendants**, et c'est
+eux qui comptent — un faux positif coûte une réponse qui existait.
+
+#### ⚠️ Et le dernier chiffre qui reste : 15 / 48 — c'est le MODÈLE
+
+Une fois le détecteur corrigé, les 15 cas restants sont des réponses que le modèle
+a réellement produites sur des questions sans réponse : « لا يجوز ذلك », « لا بأس
+بذلك », une recette de couscous, « 1989 » (chute du mur de Berlin). Deux d'entre
+elles se **contredisent** — à « ما حكم استخدام مكبر الصوت في الأذان » le modèle a
+répondu « لا بأس بذلك » puis, à une autre exécution, « لا يباح ». **Aucun réglage
+de prompt ne corrige une réponse que le modèle ne veut pas retenir.**
+
+#### Une affirmation retirée du gabarit
+
+Le titre du passage affiché disait « **المقطع الذي يجيب عن السؤال** — le passage
+qui répond à la question ». C'est une affirmation que le système n'est pas en
+mesure de tenir : dans 44 des 48 cas ci-dessus, elle aurait été **fausse**, sous
+une forme que l'utilisateur n'a aucun moyen de contester puisqu'elle vient du
+système et non du texte. Il dit maintenant que le passage a été **sélectionné**, ce
+qui est vérifiable, et invite à le contrôler : « المقطع المختار من الكتاب (يُرجى
+التحقّق منه) ».
+
+#### Un chiffre faux, publié, et corrigé
+
+Le premier rapport annonçait « **0 abstention sur 48** ». C'était mon code qui
+mentait : `if not choix:` — `0` étant falsy en Python, l'abstention était rendue
+comme un échec de lecture. Il y en avait **4**. L'erreur allait dans le sens le
+plus défavorable au mécanisme, et elle était invisible à la lecture du chiffre :
+`0` et `None` produisent le **même texte vide**, et ne se distinguent que par le
+second élément du triplet retourné. Même famille de piège que `all([])` dans
+`est_orpheline`. C'est pourquoi la sortie **brute** du modèle est conservée dans
+les rapports — c'est elle qui a permis de recompter sans refaire les 30 minutes de
+mesure.
 
 > Le projet le disait depuis le début, pour la qualité des réponses : « mesurer si
 > la réponse est bonne demande un juge ». Les trois échecs ci-dessus ne font que

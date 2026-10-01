@@ -11,9 +11,28 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app import main, rag
+from app import config, main, rag
 from app.database import get_session
 from app.ratelimit import RateLimit
+
+
+@pytest.fixture(autouse=True)
+def reglages_par_defaut(monkeypatch):
+    """Force les drapeaux EXPERIMENTAUX a leur valeur par defaut.
+
+    `app/config.py` lit l'environnement A L'IMPORT : un `ANSWER_MODE=selection`
+    reste dans le shell changeait le sens de tests qui n'ont rien a voir avec la
+    selection — trois tests d'API ont echoue ainsi, et **le resultat de la suite
+    dependait du terminal qui la lancait**. Un test doit etre reproductible ;
+    ceux qui veulent activer un drapeau le font explicitement avec monkeypatch.
+    """
+    monkeypatch.setattr(config, "ANSWER_MODE", "texte", raising=False)
+    monkeypatch.setattr(config, "CITATIONS_OBLIGATOIRES", False, raising=False)
+    monkeypatch.setattr(config, "SELECTION_ETIQUETTES", "chiffres", raising=False)
+    monkeypatch.setattr(config, "SELECTION_CHOIX", "json", raising=False)
+    monkeypatch.setattr(config, "DISTANCE_THRESHOLD", -1.0, raising=False)
+    monkeypatch.setattr(config, "HYBRID_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "LANGUAGE_ENFORCEMENT_ENABLED", True, raising=False)
 
 
 @pytest.fixture(autouse=True)

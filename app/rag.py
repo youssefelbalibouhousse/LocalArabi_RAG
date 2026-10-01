@@ -4,7 +4,9 @@ Partagée entre l'API (app.main) et le script d'ingestion (scripts.build_kb),
 pour éviter toute duplication de configuration.
 """
 
+import json
 import logging
+import re
 from collections.abc import Mapping
 
 import chromadb
@@ -273,6 +275,422 @@ def _retrieve_hybride(collection, question, n_results):
     return docs, sources
 
 
+def _invite_citations(question, context, language):
+    """Invite qui EXIGE une citation verbatim du contexte.
+
+    Variante expérimentale (voir `config.CITATIONS_OBLIGATOIRES`). Le délimiteur
+    `[[ ]]` est choisi parce qu'il est facile à taper et ABSENT du corpus : les
+    guillemets arabes « » y ponctuent les textes édités, et ne permettraient pas
+    de distinguer la citation du commentaire.
+
+    ⚠️ La consigne de langue reste EN DERNIER, comme dans l'invite normale : c'est
+    l'invariant du projet, et il vaut pour toutes les variantes.
+    """
+    if language == "fr":
+        return f"""Utilise uniquement le contexte ci-dessous pour répondre.
+
+Contexte extrait :
+{context}
+
+Question : {question}
+
+Règle : chaque affirmation doit s'appuyer sur un passage RECOPIÉ LITTÉRALEMENT du contexte, placé entre [[ et ]] — par exemple [[le passage recopié]]. Ne reformule pas ce passage.
+
+Si le contexte ne contient aucun passage qui appuie la réponse, écris uniquement cette phrase : « Désolé, il n'y a pas assez d'informations dans les documents fournis. »
+
+Consigne de langue, impérative : les extraits ci-dessus sont en arabe, mais tu dois rédiger ta réponse UNIQUEMENT EN FRANÇAIS. N'écris aucune phrase en arabe.
+
+Réponse en français :"""
+
+    return f"""استخدم السياق أدناه فقط للإجابة على السؤال.
+
+السياق المستخرج:
+{context}
+
+السؤال: {question}
+
+قاعدة إلزامية: كل حكم تذكره يجب أن يستند إلى نص منقول حرفيًا من السياق، موضوع بين [[ و ]]، هكذا: [[النص المنقول]]. انقل النص كما هو دون إعادة صياغة.
+
+إذا لم تجد في السياق أي نص يدعم الجواب، فاكتب هذه الجملة وحدها: "عذرًا، لا توجد معلومات كافية في الوثائق المرفقة"
+
+تنبيه إلزامي: يجب أن تكتب إجابتك باللغة العربية فقط، ولا تكتب أي جملة بلغة أخرى.
+
+الإجابة بالعربية:"""
+
+
+# Étiquettes des passages soumis au modèle. Des CHIFFRES par défaut.
+#
+# ⚠️ MESURÉ, et l'enseignement est l'inverse de l'intuition. Le corpus porte un
+# numéro de ligne en tête de CHAQUE ligne (« 369 - وأجمعوا… ») et des marqueurs de
+# note (« (1) ») : avec des étiquettes chiffrées, le modèle a répondu « 370 »,
+# « 369 », « 1062 » — des numéros de LIGNE — ou « 6 » pour cinq passages. Passer à
+# des LETTRES (zéro lettre latine sur 60 extraits examinés) n'a PAS suffi : le
+# modèle a rendu « أ » et « د », c'est-à-dire « حرف المقطع » traduit dans SON
+# alphabet (أ، ب، ج، د), et « 1062 » est resté. Sur 24 essais : 12 puis 11 choix
+# justes avec des chiffres, 8 avec des lettres (base « premier extrait » = 10).
+#
+# **Changer d'alphabet déplace l'ambiguïté, elle ne la supprime pas** : la cause
+# est que la sortie est du TEXTE LIBRE. On garde donc les chiffres et on contraint
+# la SORTIE (`config.SELECTION_CHOIX`).
+ETIQUETTES = "ABCDEFGH"
+
+
+def etiquettes_selection(nombre: int, lettres=None) -> list[str]:
+    """Les étiquettes des ``nombre`` passages.
+
+    ``lettres`` force le jeu d'étiquettes ; ``None`` suit
+    ``config.SELECTION_ETIQUETTES``. ⚠️ Ce paramètre doit être HONORÉ partout où
+    l'on construit une correspondance étiquette → rang : sinon `lire_choix`
+    chercherait « C » dans un jeu d'étiquettes chiffrées et ne lirait plus rien.
+    """
+    if lettres is None:
+        lettres = config.SELECTION_ETIQUETTES == "lettres"
+    if lettres:
+        return list(ETIQUETTES[:nombre])
+    return [str(rang) for rang in range(1, nombre + 1)]
+
+
+def schema_choix(nombre_de_passages: int) -> dict:
+    """Schéma JSON de la réponse : un entier entre 0 et le nombre de passages.
+
+    C'est ce qui rend un choix ILLISIBLE impossible plutôt que détecté. Un
+    numéro de ligne recopié (« 1062 ») ne peut pas être produit : la contrainte
+    porte sur la génération des tokens, pas sur une vérification après coup.
+    ``0`` reste permis, et c'est l'abstention.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "passage": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": nombre_de_passages,
+            }
+        },
+        "required": ["passage"],
+    }
+
+
+def numeroter_passages(documents, etiquettes=None, lettres=None):
+    """Étiquette les passages soumis au modèle : ``[A] …``, ``[B] …``
+
+    L'étiquetage est ce qui permet au modèle de RÉPONDRE PAR UNE ÉTIQUETTE au lieu
+    de rédiger : c'est le seul format dont la sortie se vérifie sans rien
+    comprendre au sens.
+
+    ``etiquettes`` impose la liste exacte ; ``lettres`` choisit le jeu d'étiquettes
+    sans avoir à le construire. Les deux sont transmis à
+    ``etiquettes_selection``, qui reste le seul endroit qui décide.
+    """
+    if etiquettes is None:
+        etiquettes = etiquettes_selection(len(documents), lettres)
+    return "\n\n".join(
+        f"[{etiquette}] {texte}"
+        for etiquette, texte in zip(etiquettes, documents, strict=True)
+    )
+
+
+def construire_invite_selection(question, contexte, language="ar", lettres=None, json_format=None):
+    """Invite qui demande de CHOISIR un passage, et non de rédiger.
+
+    La tâche est fermée — rendre une étiquette — ce qui laisse beaucoup moins de
+    liberté qu'une réponse libre. Un modèle de 8 milliards de paramètres sait mal
+    s'abstenir quand on lui demande de rédiger ; il s'abstient mieux quand on lui
+    demande de choisir entre des étiquettes.
+
+    ⚠️ La consigne « ne recopie rien du texte » n'est PAS décorative : sans elle,
+    le modèle rend un numéro de LIGNE du corpus (« 1062 ») au lieu d'un numéro de
+    passage, et la réponse est illisible.
+    """
+    if lettres is None:
+        lettres = config.SELECTION_ETIQUETTES == "lettres"
+    if json_format is None:
+        json_format = config.SELECTION_CHOIX == "json"
+    quoi = ("حرف المقطع" if lettres else "رقم المقطع") if language == "ar" else (
+        "la LETTRE" if lettres else "le numéro"
+    )
+
+    if json_format:
+        # La contrainte de sortie fait le travail ; l'invite ne fait que nommer
+        # la forme attendue. Sans elle, le modèle commente ou recopie.
+        if language == "fr":
+            return f"""Lis les passages étiquetés ci-dessous.
+
+Passages :
+{contexte}
+
+Question : {question}
+
+Réponds UNIQUEMENT par un objet JSON : {{"passage": N}}, où N est {quoi} du passage qui répond DIRECTEMENT à la question, ou 0 si aucun passage ne répond. Ne recopie rien du texte et n'ajoute aucun commentaire.
+
+JSON :"""
+        return f"""اقرأ المقاطع الموسومة أدناه.
+
+المقاطع:
+{contexte}
+
+السؤال: {question}
+
+أجب بصيغة JSON فقط: {{"passage": N}}
+حيث N هو {quoi} الذي يجيب عن السؤال إجابة مباشرة، أو 0 إذا لم يجب أي مقطع. لا تنسخ شيئًا من النص ولا تضف شرحًا.
+
+JSON:"""
+
+    if language == "fr":
+        return f"""Lis les passages étiquetés ci-dessous, puis réponds par une seule étiquette.
+
+Passages :
+{contexte}
+
+Question : {question}
+
+Écris {quoi} du passage qui répond DIRECTEMENT à la question. Écris cette étiquette seule, sans aucun autre mot, et ne recopie rien du texte. Si aucun passage ne répond à la question, écris : 0
+
+Étiquette :"""
+
+    return f"""اقرأ المقاطع الموسومة أدناه، ثم أجب بوسم واحد فقط.
+
+المقاطع:
+{contexte}
+
+السؤال: {question}
+
+اكتب {quoi} الذي يجيب عن السؤال إجابة مباشرة. اكتب الوسم وحده، دون أي كلمة أخرى، ولا تنسخ شيئًا من النص. وإذا لم يجب أي مقطع عن السؤال، اكتب: 0
+
+الوسم:"""
+
+
+def lire_choix(
+    reponse: str,
+    nombre_de_passages: int,
+    lettres=None,
+    json_format=None,
+) -> int | None:
+    """Le passage choisi par le modèle, ou ``None`` si la réponse est inutilisable.
+
+    Renvoie ``0`` quand le modèle déclare qu'aucun passage ne répond — ce qui
+    n'est PAS un échec de lecture, mais une réponse : c'est la bonne conduite sur
+    une question que le corpus ne peut pas trancher.
+
+    Renvoie ``None`` quand la réponse ne contient aucune étiquette exploitable, ou
+    quand elle sort des bornes. On ne DEVINE pas : un choix illisible vaut un
+    refus, et il doit être mesurable comme tel. Mesuré : « 6 » pour cinq passages
+    reste illisible — il n'y a pas de sixième passage, donc il n'y a pas de choix.
+
+    On lit le DERNIER jeton utile : un modèle qui commente avant de conclure écrit
+    sa conclusion à la fin. Un jeton PRÉCÉDÉ D'UN SIGNE n'en est pas un : « -2 »
+    ne vaut pas 2, il vaut illisible.
+    """
+    if lettres is None:
+        lettres = config.SELECTION_ETIQUETTES == "lettres"
+    if json_format is None:
+        json_format = config.SELECTION_CHOIX == "json"
+    texte = reponse or ""
+
+    if json_format:
+        # La contrainte de sortie garantit un objet bien formé, mais pas le
+        # contenu : un champ absent, un type inattendu ou un texte quelconque
+        # restent possibles avec un autre fournisseur. On vérifie donc quand
+        # même — « la contrainte devrait l'empêcher » n'est pas une preuve.
+        try:
+            donnees = json.loads(texte.strip())
+        except ValueError:
+            return None
+        if not isinstance(donnees, dict):
+            return None
+        valeur = donnees.get("passage")
+        if isinstance(valeur, bool) or not isinstance(valeur, int):
+            return None
+        return valeur if 0 <= valeur <= nombre_de_passages else None
+
+    if lettres:
+        # Avec des étiquettes-lettres, on ne lit QUE des lettres ISOLÉES (et « 0 »
+        # pour l'abstention) :
+        #  - un chiffre dans la réponse est un numéro de ligne du corpus recopié,
+        #    donc précisément ce qu'on ne veut pas interpréter ;
+        #  - une lettre COLLÉE à d'autres lettres est un mot (« aucun » contient
+        #    un « a »), pas une étiquette. Sans cette borne, « aucun » serait lu
+        #    comme le passage A — c'est-à-dire deviné.
+        jetons = re.findall(r"(?<![-\u2212])\d+|(?<![A-Za-z])[A-Za-z](?![A-Za-z])", texte)
+        correspondance = {
+            etiquette: rang
+            for rang, etiquette in enumerate(
+                etiquettes_selection(nombre_de_passages, lettres), start=1
+            )
+        }
+        for jeton in reversed(jetons):
+            if jeton == "0":
+                return 0
+            rang = correspondance.get(jeton.upper())
+            if rang is not None:
+                return rang
+        return None
+
+    nombres = re.findall(r"(?<![-\u2212])\d+", texte)
+    if not nombres:
+        return None
+    choix = int(nombres[-1])
+    return choix if 0 <= choix <= nombre_de_passages else None
+
+
+def format_passage_choisi(passage: str, source: Mapping, language="ar") -> str:
+    """Le texte montré à l'utilisateur : le passage, et sa référence.
+
+    Aucune phrase n'est rédigée par le modèle : c'est ce qui rend l'invention
+    impossible. L'introduction et la référence sont des gabarits fixes.
+
+    ⚠️ L'introduction dit que le passage a été SÉLECTIONNÉ, et rien de plus. Elle
+    disait « المقطع الذي يجيب عن السؤال » — « le passage qui répond à la
+    question » — c'est-à-dire une affirmation que le système n'est PAS en mesure
+    de tenir : mesuré, sur 48 essais de questions SANS réponse dans le corpus, le
+    modèle n'a renoncé que 4 fois. Dans les 44 autres cas, le titre aurait
+    affirmé une chose fausse. Le système sait quel passage il a choisi ; il ne
+    sait pas si ce passage répond. Il ne doit donc l'affirmer dans aucun cas.
+    """
+    intro = (
+        "Passage sélectionné dans l'ouvrage (à vérifier) :"
+        if language == "fr"
+        else "المقطع المختار من الكتاب (يُرجى التحقّق منه):"
+    )
+    return (
+        f"{intro}\n\n{passage.strip()}\n\n"
+        f"{format_sources([source], language)}"
+    )
+
+
+def repondre_par_selection(question, documents, sources, language="ar"):
+    """Répond en SÉLECTIONNANT un passage parmi ceux qui ont été récupérés.
+
+    Retourne ``(texte, rang_choisi, brute)`` :
+
+    - ``rang_choisi`` vaut ``0`` quand le modèle déclare qu'aucun passage ne
+      répond. C'est une RÉPONSE, pas un échec : c'est la bonne conduite sur une
+      question que le corpus ne peut pas trancher. Le texte rendu est vide.
+    - ``rang_choisi`` vaut ``None`` quand la réponse est illisible (hors
+      protocole, ou rang hors bornes). Le texte rendu est vide AUSSI — mais les
+      deux causes ne se confondent pas, et l'appelant doit pouvoir les compter
+      séparément.
+
+    ⚠️ **``0`` et ``None`` ne doivent JAMAIS être confondus.** Ce code a écrit
+    ``if not choix:`` : ``0`` étant falsy, l'abstention était rendue comme un
+    échec de lecture. Le rapport annonçait donc « 0 abstention sur 48 » là où il y
+    en avait 4 — l'erreur allait dans le sens le plus défavorable au mécanisme,
+    et elle était invisible à la lecture du chiffre. C'est le même piège que
+    ``all([])`` dans ``evaluation.est_orpheline`` : une valeur falsy qui fait
+    disparaître un cas.
+
+    ⚠️ ``brute`` — la sortie NON interprétée du modèle — est retournée parce que
+    sans elle un choix illisible est INDÉMÉLABLE : le texte rendu est vide dans
+    tous les cas, qu'on ait affaire à un modèle muet, à un numéro hors bornes,
+    ou à trois paragraphes de prose. C'est ce qui a permis de découvrir que les
+    ``{"passage": 0}`` comptés comme illisibles étaient des abstentions.
+    """
+    if not documents:
+        return "", None, ""
+
+    contexte = numeroter_passages(documents)
+    brute = generate_selection(question, contexte, language, len(documents))
+    choix = lire_choix(brute, len(documents))
+
+    # ⚠️ ``is None``, et non ``not choix`` : ``0`` est une abstention, c'est-à-dire
+    # une réponse. Le confondre avec un échec de lecture a fait publier
+    # « 0 abstention sur 48 » là où il y en avait 4.
+    if choix is None:
+        return "", None, brute
+
+    if choix == 0:
+        return "", 0, brute
+
+    return (
+        format_passage_choisi(documents[choix - 1], sources[choix - 1], language),
+        choix,
+        brute,
+    )
+
+
+def repondre_par_refus_puis_selection(question, documents, sources, language="ar"):
+    """Renonce d'abord (question ouverte), ancre ensuite (sélection).
+
+    Retourne ``(texte, rang_choisi, brute)`` avec la convention de
+    `repondre_par_selection` : ``0`` pour un renoncement, ``None`` pour une
+    lecture impossible.
+
+    ⚠️ ``brute`` est la sortie qui a **DÉCIDÉ** — le brouillon de la question
+    ouverte — et non celle de la sélection. C'est ce brouillon qu'il faut pouvoir
+    relire : un renoncement manqué par le détecteur ne se voit QUE dans le texte
+    du modèle, et il serait écrasé dès que le second appel part. Mesuré : ce régime
+    renonce **26 fois sur 48** là où le texte libre seul en renonce 34 ; l'écart
+    est soit un refus manqué, soit un modèle qui a moins refusé — et **sans ce
+    brouillon, les deux causes sont indiscernables**.
+
+    ⚠️ POURQUOI DEUX RÉGIMES PLUTÔT QU'UN. Mesuré sur les 24 questions SANS
+    réponse dans le corpus (2 répétitions, 48 essais) :
+
+        texte libre seul ....... renonce 34 / 48  (71 %)
+        sélection seule ........ renonce  4 / 48  ( 8 %)
+
+    Le modèle SAIT dire « je ne sais pas » en question ouverte, et ne le dit
+    presque jamais quand on lui demande de choisir parmi des passages : une
+    question à choix multiple appelle une réponse, une question ouverte admet
+    l'ignorance. On prend donc chaque régime là où il est le meilleur — le
+    premier décide s'il faut renoncer, le second empêche l'invention de texte.
+
+    ⚠️ Le premier appel sert à DÉCIDER, pas à rédiger : son texte n'est JAMAIS
+    montré. C'est ce qui permet d'utiliser `generate` (un seul appel) au lieu
+    d'`answer_question`, dont la reprise de langue coûterait un second appel pour
+    un texte qu'on jette de toute façon.
+
+    ⚠️ Ce régime n'est PAS parfait, et sa faiblesse est connue : la décision
+    repose sur `est_un_refus`, un détecteur par formules qui manquait 7 refus sur
+    34 avant d'être étendu aux cas observés. Un refus manqué fait passer une
+    question sans réponse jusqu'à la sélection, qui montrera alors un passage hors
+    sujet. Mesuré : le texte libre ne renonce pas 14 fois sur 48, et dans ces cas
+    il produit des fatwas brèves et deux réponses CONTRADICTOIRES à la même
+    question. Ce régime les transforme en passages hors sujet — trois fois mieux
+    que 92 %, pas parfait.
+    """
+    if not documents:
+        return "", None, ""
+
+    # 1. Question OUVERTE : elle décide s'il y a de quoi répondre.
+    brouillon = generate(question, "\n\n".join(documents), language)
+    if est_un_refus(brouillon, language):
+        # Le brouillon est conservé comme sortie brute : c'est lui qui permettra
+        # de juger un renoncement, ou de constater un refus manqué.
+        return "", 0, brouillon
+
+    # 2. Le modèle n'a pas renoncé : on ANCRE la réponse dans un passage réel.
+    #
+    # ⚠️ Le brouillon reste la sortie BRUTE rendue, et non celle de la sélection :
+    # c'est lui qui porte la décision. Le perdre rendrait un renoncement manqué
+    # indiagnosticable — on ne saurait pas si le modèle a refusé sans être reconnu,
+    # ou s'il n'a pas refusé du tout.
+    texte, rang, _brute_selection = repondre_par_selection(
+        question, documents, sources, language
+    )
+    return texte, rang, brouillon
+
+
+def generate_selection(question, contexte, language="ar", nombre_de_passages=0):
+    """Envoie l'invite de sélection au fournisseur configuré.
+
+    Séparée de `generate` parce que la tâche n'est pas la même : `generate`
+    rédige, celle-ci choisit une étiquette. Les garder distinctes permet de
+    mesurer l'une sans toucher à l'autre — et c'est ce qu'on veut savoir.
+
+    `nombre_de_passages` sert à construire le schéma de sortie : c'est lui qui
+    borne l'entier au nombre réel de passages, donc qui rend un choix hors bornes
+    impossible à produire.
+    """
+    prompt = construire_invite_selection(question, contexte, language)
+    schema = (
+        schema_choix(nombre_de_passages)
+        if config.SELECTION_CHOIX == "json"
+        else None
+    )
+    return _appeler_modele([{"role": "user", "content": prompt}], format=schema)
+
+
 def build_prompt(question, context, language="ar"):
     """Construit l'invite envoyée au modèle, dans la langue demandée.
 
@@ -301,6 +719,9 @@ def build_prompt(question, context, language="ar"):
     durcissement, mesurer PLUSIEURS exécutions par question — c'est le seul
     protocole qui puisse trancher.
     """
+    if config.CITATIONS_OBLIGATOIRES:
+        return _invite_citations(question, context, language)
+
     if language == "fr":
         return f"""Utilise uniquement le contexte ci-dessous pour répondre précisément à la question. Si le contexte ne contient pas la réponse, dis : « Désolé, il n'y a pas assez d'informations dans les documents fournis. ».
 
@@ -325,22 +746,107 @@ Réponse en français :"""
 الإجابة بالعربية:"""
 
 
-# Les formules de refus que l'invite impose, par langue.
+# Les formules de refus, par langue.
 #
-# ⚠️ Sert à reconnaître un refus POUR NE PAS CITER DE SOURCE dessous. Ce n'est pas
-# une mesure du taux de refus : mesuré le 29/09, un détecteur de ce genre a compté
-# 5 refus sur 15 là où une lecture en trouve 12 — le modèle refuse aussi avec ses
-# propres mots (« لا يوجد سياق يتعلق… », « حسب الوثائق المرفقة لا يوجد جواب… »).
-# La liste est donc LARGE, et elle manquera encore des cas ; mais l'erreur inverse
-# — décorer un refus d'une citation — est pire, car elle fait croire à une source.
+# ⚠️ Sert à deux choses, et la seconde est plus exigeante que la première :
+#   1. NE PAS CITER DE SOURCE sous un refus (voir `est_un_refus`) ;
+#   2. DÉCIDER de renoncer dans le régime `refus_puis_selection`.
+# Pour (2), un refus manqué fait passer une question sans réponse jusqu'à la
+# sélection, qui montrera un passage hors sujet. L'erreur est donc coûteuse dans
+# les deux sens, et la liste a été étendue aux formules RÉELLEMENT observées.
+#
+# ⚠️ Ce n'est toujours PAS une mesure du taux de refus. Mesuré le 29/09, un
+# détecteur de ce genre comptait 5 refus sur 15 là où une lecture en trouve 12.
+# Et le 01/10, sur 48 essais hors corpus, il en manquait **7 sur 34 (21 %)**, tous
+# des reformulations légitimes. Les sept formes ci-dessous ont été relevées en
+# lisant les réponses RÉELLES (le fichier UTF-8, pas le terminal) :
+#
+#   لا توجد المعلومات اللازمة لرد السؤال.        (et non « لا توجد معلومات »)
+#   لا يوجد صلة للسؤال في السياق.
+#   لا أوجد الإجابة في السياق السابق.            (أوجد, pas أجد)
+#   لا يوجد سؤال صحيح يمكن الإجابة عليه…
+#   لا تجد الإجابة في السياق المذكور.
+#   لا يوجد معلومات في السياق المرفق عن…         (يوجد مع معلومات !)
+#   لا يوجد mention لذلك في النص.               (mélange arabe/latin)
+#
+# ⚠️ Deux de ces formes ont d'abord été écrites FAUX, parce que je les avais lues
+# sur la sortie d'un terminal Windows déformée par cp1252 : « أجد » au lieu de
+# « أوجد », et « توجد » au lieu de « يوجد ». **Ne jamais lire de l'arabe dans un
+# terminal cp1252** — passer par un fichier UTF-8.
+#
+# Et il en manquera encore d'autres. **Un taux de refus se lit, il ne se compte pas.**
+# Négations de DISPONIBILITÉ : « il n'y a pas… », « je ne trouve pas… ».
+#
+# C'est la moitié d'une RÈGLE À DEUX SIGNAUX (voir `est_un_refus`) : ces mots
+# seuls ne suffisent pas, parce qu'une réponse peut commencer par « لا يجوز »
+# — une fatwa, pas un refus.
+NEGATIONS_DISPONIBILITE = (
+    "لا يوجد",
+    "لا توجد",
+    "لا اوجد",
+    "لا وجدت",
+    "لا اجد",
+    "لا نجد",
+    "لا اعلم",
+    "لا نعلم",
+    "لم اجد",
+    "لم نجد",
+    "لم يوجد",
+    "لم توجد",
+    "لم ينص",
+    "لم يذكر",
+    "لم يرد",
+    "لا يتضمن",
+    "لا تتضمن",
+    "لا يذكر",
+    "لا تذكر",
+    "لا يرد",
+    "لا ترد",
+    "ليس هناك",
+    "لا شيء",
+)
+
+# Références à la SOURCE. C'est la seconde moitié, et c'est elle qui distingue
+# « le texte ne dit rien » — un refus — de « telle chose est interdite » — une
+# réponse. Les deux signaux peuvent être ÉLOIGNÉS l'un de l'autre dans la phrase,
+# ce qui condamne toute recherche de phrase exacte.
+#
+# Formes NORMALISÉES (sans hamza, ة → ه) : « الوثائق » s'écrit ici « الوثايق ».
+REFERENCES_SOURCE = (
+    "السياق",
+    "السياقات",
+    "النص",
+    "النصوص",
+    "الوثايق",
+    "المرفق",
+    "المقدم",
+    "المذكور",
+    "المشار",
+    "السطور",
+    "المستخرج",
+    "المصادر",
+)
+
 FORMULES_DE_REFUS = {
     "ar": (
+        # Formules que l'INVITE impose — celles-ci ne varient pas.
         "لا توجد معلومات",
+        "لا توجد المعلومات",
+        "لا يوجد معلومات",
         "لا توجد الاجابه",
         "لا اوجد معلومات",
         "لا يوجد سياق",
         "لا يوجد جواب",
+        "لا يوجد صله",
+        "لا يوجد سوال صحيح",
+        "لا يوجد mention",
         "لا توجد في الوثايق",
+        "لا اوجد الاجابه",
+        "لا تجد الاجابه",
+        # Refus COMPLET en deux mots : il n'y a pas de seconde source à exiger, et
+        # la règle à deux signaux ne peut donc pas le reconnaître. Observé sur
+        # « هل يفطر الصائم… » → « لا جواب. », qui a laissé passer un passage.
+        "لا جواب",
     ),
     "fr": (
         "pas assez d informations",
@@ -350,6 +856,30 @@ FORMULES_DE_REFUS = {
         "ne permet pas de repondre",
     ),
 }
+
+
+def _est_un_refus_par_signaux(normalisee: str) -> bool:
+    """Refus reconnu par la RÈGLE À DEUX SIGNAUX : négation + référence à la source.
+
+    ⚠️ POURQUOI cette règle, et pas une liste de phrases de plus. Mesuré le
+    01/10 sur le régime `refus_puis_selection` (24 questions hors corpus × 2) : le
+    détecteur par formules manquait **6 refus sur 33 (18 %)**, ce qui faisait
+    tomber le renoncement du régime à 27/48 quand le modèle, lui, refusait 33 fois.
+    L'écart était entièrement attribuable au détecteur — et il avait fallu LIRE
+    les 21 brouillons pour le savoir.
+
+    Les six formes manquées avaient un point commun : une négation de
+    disponibilité ET une référence à la source, souvent SÉPARÉES par d'autres
+    mots (« لا يوجد في السياق المستخرج معلومات عن… »). Aucune liste de phrases
+    exactes ne peut les couvrir ; deux signaux, oui.
+
+    ⚠️ L'erreur inverse est plus coûteuse : « لا يجوز بيع الأسهم » contient une
+    négation mais aucun mot de source, et c'est une FATWA, pas un refus — la
+    conjonction des deux signaux est donc nécessaire, chacun seul ne suffit pas.
+    """
+    a_negation = any(mot in normalisee for mot in NEGATIONS_DISPONIBILITE)
+    a_reference = any(mot in normalisee for mot in REFERENCES_SOURCE)
+    return a_negation and a_reference
 
 
 def est_un_refus(reponse: str, language: str = "ar") -> bool:
@@ -369,10 +899,15 @@ def est_un_refus(reponse: str, language: str = "ar") -> bool:
     trompeuse.
     """
     normalisee = _normaliser_pour_refus(reponse)
+    if language != "ar":
+        return any(
+            _normaliser_pour_refus(formule) in normalisee
+            for formule in FORMULES_DE_REFUS.get(language, FORMULES_DE_REFUS["ar"])
+        )
     return any(
         _normaliser_pour_refus(formule) in normalisee
-        for formule in FORMULES_DE_REFUS.get(language, FORMULES_DE_REFUS["ar"])
-    )
+        for formule in FORMULES_DE_REFUS["ar"]
+    ) or _est_un_refus_par_signaux(normalisee)
 
 
 def _normaliser_pour_refus(texte: str) -> str:
@@ -429,6 +964,41 @@ def build_messages(question, context, language="ar", previous_answer=None):
     return messages
 
 
+def _appeler_modele(messages, format=None):
+    """Envoie une liste de messages au fournisseur configuré.
+
+    Point de passage UNIQUE : `generate` (rédaction), la réécriture de langue et
+    la sélection de passage (choix d'un numéro) partagent le même appel, donc le
+    même fournisseur et le même modèle. Une seconde copie de cet appel
+    finirait par diverger — et `LLM_PROVIDER` cesserait d'être respecté quelque
+    part sans que rien ne le signale.
+
+    `format` : schéma JSON qui CONTRAINT la sortie, ou ``None`` pour du texte
+    libre. La contrainte est appliquée pendant la génération des tokens : elle
+    rend une forme interdite impossible à produire, là où une consigne dans
+    l'invite ne fait que la déconseiller. Avec un fournisseur OpenAI, seul
+    ``json_object`` est demandé — le schéma n'est pas transporté, car tous les
+    serveurs compatibles ne le comprennent pas.
+    """
+    if config.LLM_PROVIDER == "openai":
+        kwargs = {}
+        if format is not None:
+            kwargs["response_format"] = {"type": "json_object"}
+        response = get_openai_client().chat.completions.create(
+            model=config.LLM_MODEL,
+            messages=messages,
+            **kwargs,
+        )
+        return response.choices[0].message.content or ""
+
+    response = get_ollama_client().chat(
+        model=config.LLM_MODEL,
+        messages=messages,
+        format=format,
+    )
+    return response["message"]["content"]
+
+
 def generate(question, context, language="ar", previous_answer=None):
     """Envoie l'invite au fournisseur configuré et retourne la réponse.
 
@@ -441,20 +1011,7 @@ def generate(question, context, language="ar", previous_answer=None):
 
     `previous_answer` : réponse à faire réécrire (voir `build_repair_instruction`).
     """
-    messages = build_messages(question, context, language, previous_answer)
-
-    if config.LLM_PROVIDER == "openai":
-        response = get_openai_client().chat.completions.create(
-            model=config.LLM_MODEL,
-            messages=messages,
-        )
-        return response.choices[0].message.content or ""
-
-    response = get_ollama_client().chat(
-        model=config.LLM_MODEL,
-        messages=messages,
-    )
-    return response["message"]["content"]
+    return _appeler_modele(build_messages(question, context, language, previous_answer))
 
 
 def answer_question(question, context, language="ar"):
