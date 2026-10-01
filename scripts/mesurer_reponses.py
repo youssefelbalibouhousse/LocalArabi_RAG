@@ -36,7 +36,7 @@ from pathlib import Path
 # Permet d'exécuter le script directement (python scripts/mesurer_reponses.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import config, evaluation, rag
+from app import config, evaluation, fidelite, rag
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 GOLDEN_PATH = BASE_DIR / "eval" / "golden.jsonl"
@@ -71,6 +71,15 @@ def mesurer_question(collection, question, repetitions):
             "context": docs,
             "sources": sources,
             "refus": bool(rag.est_un_refus(reponse, question.lang)) if reponse else True,
+            # Les citations sont extraites et vérifiées ICI, et conservées dans le
+            # rapport : c'est le seul verdict mécaniquement démontrable. Une
+            # citation absente du contexte est une invention PROUVÉE — là où une
+            # réponse libre, faite du vocabulaire du corpus, ne se laisse pas
+            # juger par des mots.
+            "citations": list(fidelite.citations(reponse)),
+            "citations_fabriquees": list(
+                fidelite.citations_non_verifiees(reponse, contexte)
+            ),
             "latency_ms": round(duree, 1),
         })
 
@@ -148,6 +157,13 @@ def mode_rapport(args):
         for essai in resultat["attempts"]
         if essai["refus"]
     )
+    non_verifiables = [
+        (resultat["id"], essai["repetition"])
+        for resultat in resultats
+        for essai in resultat["attempts"]
+        if not essai["refus"]
+        and (essai["citations_fabriquees"] or not essai["citations"])
+    ]
     rapport = {
         "label": label,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -162,6 +178,7 @@ def mode_rapport(args):
             "questions": len(resultats),
             "reponses": total,
             "refus_reconnus": refus,
+            "non_verifiables": len(non_verifiables),
         },
         "results": resultats,
     }
@@ -179,6 +196,11 @@ def mode_rapport(args):
         f"Refus RECONNUS         : {refus} / {total}"
         "   (indice seulement — la reconnaissance par phrase s'est déjà trompée"
         " dans le sens rassurant)"
+    )
+    print(
+        f"NON VÉRIFIABLES        : {len(non_verifiables)} / {total - refus}"
+        "   (affirmation sans citation, ou citation absente du contexte —"
+        " invention démontrée)"
     )
     print(SEPARATEUR)
     print(f"📄 Rapport enregistré : {chemin}")
